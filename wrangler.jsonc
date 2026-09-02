@@ -7,11 +7,15 @@
     "enabled": true
   },
   "assets": {
-    // PENTING: harus "dist" (hasil scripts/build.js), BUKAN "public".
-    // Tanpa file ini, Wrangler auto-detect assets.directory ke "public"
-    // (folder source mentah, masih berisi placeholder APP_MODE='mock')
-    // setiap deploy — itu penyebab banner MODE DEMO tetap muncul di
-    // production meski environment variable sudah diisi benar.
-    "directory": "dist"
+    // DIUBAH untuk repo DIS (2026-09-02): source asli (dataku2026) pakai
+    // "dist" karena scripts/build.js men-generate dist/ dari public/
+    // (injeksi kredensial dari env var, dsb). scripts/build.js TIDAK ada
+    // di repo DIS ini -- belum ikut dibawa dari bundel manapun -- jadi
+    // "dist" tidak akan pernah ada di sini sampai build.js dibuat ulang.
+    // Sementara itu assets.directory diarahkan langsung ke "public".
+    // AKIBATNYA: tidak ada langkah build/injeksi kredensial. public/
+    // hanya berisi fragmen modul referensi + 1 index.html placeholder
+    // (lihat INTEGRATION_NOTES.md) -- BUKAN aplikasi yang berfungsi.
+    "directory": "public"
   }
 }
