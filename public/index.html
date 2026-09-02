@@ -1,30 +1,31 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DIS — belum ada aplikasi</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIS -- Sistem Informasi Santri</title>
+<meta name="description" content="Sistem Informasi Santri, Pesantren Modern Al-Falah Abu Lam U">
 <style>
-  body{font-family:system-ui,sans-serif;max-width:640px;margin:80px auto;padding:0 20px;color:#1c2420;line-height:1.6;}
-  h1{font-size:20px;}
-  code{background:#f2ecdd;padding:2px 6px;border-radius:4px;}
-  ul{padding-left:20px;}
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f2ec; color: #1c2420; }
+  .login-box { max-width: 360px; margin: 4rem auto; padding: 2rem; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+  .login-box h1 { font-size: 1.2rem; margin-bottom: .2rem; }
+  .login-box .subtitle { color: #666; font-size: .85rem; margin-bottom: 1.2rem; }
+  form label { display: block; margin-bottom: .8rem; font-size: .85rem; }
+  form input, form textarea, form select { width: 100%; padding: .5rem; margin-top: .3rem; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+  button { padding: .6rem 1.2rem; border: none; border-radius: 8px; background: #1a6b57; color: #fff; font-weight: 600; cursor: pointer; }
+  .error { color: #c1503f; font-size: .85rem; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; padding: .8rem 1.5rem; background: #0f3d34; color: #fff; }
+  main { max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  .catatan-form { background: #fff; padding: 1.2rem; border-radius: 10px; margin-bottom: 1.5rem; }
+  .catatan-list { list-style: none; padding: 0; }
+  .catatan-list li { background: #fff; padding: .8rem 1rem; border-radius: 8px; margin-bottom: .6rem; }
+  .hint { font-size: .75rem; color: #888; }
 </style>
 </head>
 <body>
-  <h1>Repo DIS — belum ada aplikasi untuk di-deploy</h1>
-  <p>
-    Halaman ini adalah placeholder supaya pipeline deploy Cloudflare
-    Workers Builds punya sesuatu untuk disajikan. Repo ini saat ini
-    hanya berisi fragmen modul referensi dari <code>dataku2026</code>,
-    bukan aplikasi yang berfungsi.
-  </p>
-  <p>Yang masih perlu dikerjakan sebelum ada aplikasi nyata:</p>
-  <ul>
-    <li>Menentukan daftar modul/menu produk untuk DIS</li>
-    <li>Membangun <code>main.js</code> / <code>ui-shell.js</code> / <code>auth.js</code> yang benar-benar berjalan (versi di <code>patterns/</code> masih bergantung pada 15 modul yang belum dibuat)</li>
-    <li>Mendesain skema data santri untuk <code>mockDataService.js</code> / <code>supabaseDataService.js</code></li>
-  </ul>
-  <p>Detail lengkap: lihat <code>INTEGRATION_NOTES.md</code> di root repo.</p>
+<div id="app">Memuat...</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script type="module" src="/js/main.js"></script>
 </body>
 </html>
