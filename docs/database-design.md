@@ -402,6 +402,34 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 - **Ada data "Lulus KEMMAS" (hafalan Qur'an)** yang mungkin masuk kategori Prestasi (sub-kategori tahfizh) — belum dipetakan ke skema Pelanggaran & Prestasi.
 - **Data historis (sheet "Perkelas", tahun ajaran 2022-2023) pakai skala nilai 0-10**, sementara skema `nilai` saat ini asumsi skala 0-100. Kalau data lama itu perlu diimpor, butuh keputusan normalisasi skala terpisah.
 
+## `users` + Auth (Tahap 19-21, schema_017-019, baru — blocker RLS)
+
+**Status: struktur lengkap, BELUM diuji ke Postgres asli.** Menjawab hampir semua TODO RLS di seluruh dokumen di atas.
+
+### `users` (schema_017)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK, FK -> **auth.users.id** (1:1 dengan akun Supabase Auth, BUKAN uuid baru), ON DELETE CASCADE |
+| email | text | NOT NULL, UNIQUE |
+| role | text | CHECK IN ('admin','ustadz','keuangan_spp','wali') |
+| nama_lengkap | text | NOT NULL |
+| wali_id | uuid | FK -> wali.id, ON DELETE RESTRICT — WAJIB diisi kalau role='wali', WAJIB NULL kalau bukan (dijaga CHECK) |
+| created_at | timestamptz | default now() |
+
+**Penting:** `users` DIS **terpisah** dari users/auth di `dataku2026` — dua project, dua populasi akun. Pegawai HRIS yang jadi *pelapor* pelanggaran (`pegawai_hris_referensi`) **tidak otomatis** dapat akun login DIS.
+
+Trigger `on_auth_user_created` otomatis membuat baris `public.users` saat akun `auth.users` baru dibuat — **wajib** `raw_user_meta_data` berisi `role` saat signup, kalau tidak insert gagal (disengaja). **Belum diputuskan:** alur pendaftaran akun (admin invite? self-signup?).
+
+**Fungsi helper** (dipakai RLS di seluruh tabel): `current_user_role()`, `current_user_wali_id()`, `is_wali_of_santri(santri_id)` — menggantikan pola placeholder `auth.jwt() ->> 'role'` di semua migrasi sebelumnya.
+
+### FK ke `users.id` diaktifkan (schema_018)
+Semua kolom yang sebelumnya "FK BELUM diaktifkan" sekarang punya FK sungguhan, `ON DELETE RESTRICT`. **Konsekuensi berantai:** akun staf yang **pernah** mencatat/menyetujui apa pun tidak bisa dihapus permanen — bahkan hapus `auth.users`-nya akan gagal (CASCADE terblokir RESTRICT di `public.users`). "Nonaktifkan akun" butuh mekanisme lain — **belum ada strukturnya**.
+
+### RLS sungguhan (schema_019)
+Policy nyata untuk `wali` (SELECT hanya santri miliknya, semua tabel relevan) dan `keuangan_spp` (CRUD penuh SPP). **Belum lengkap:** kebijakan **ustadz masih sementara** (SELECT umum tanpa batasan kelas) — pembatasan "hanya kelas yang diampu" butuh tabel penugasan ustadz↔kelas/mapel yang **belum ada di skema manapun**. Policy INSERT/UPDATE untuk ustadz juga belum ditulis.
+
+**BELUM DIUJI ke Postgres asli manapun.**
+
 ## Dependencies
 
 - Belum ada PRD/SRS formal — dokumen ini seharusnya di-review balik begitu PRD dibuat.
@@ -414,15 +442,18 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 
 ## Next Actions
 
-**Status per 2026-09-02: 17 migrasi ditulis (schema_001 s/d schema_016, 19 tabel + 1 view + 3 fungsi).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
+**Status per 2026-09-02: 20 migrasi ditulis (schema_001 s/d schema_019, 20 tabel + 1 view + 6 fungsi), + 1 Edge Function (belum dideploy, sengaja ditunda).** Belum satupun migrasi dijalankan/diuji ke Postgres asli manapun.
 
 1. Konfirmasi/koreksi 6 asumsi lama (santri/wali/kelas — sudah lama tertunda).
 2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — tidak ada trigger status otomatis.
 3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin.
 4. **Isi angka `pengaturan_ambang_pelanggaran`** (schema_013) — berapa poin untuk SP1/SP2/SP3.
-5. **DITUNDA (keputusan eksplisit pengguna, 2026-09-02):** deploy job sinkronisasi HRIS (kode sudah ada di `supabase/functions/sync-pegawai-hris/`, Tahap 18) — **sengaja tidak dilanjutkan dulu**, bukan terlupakan. Kode + README sudah siap kalau nanti mau dilanjutkan: perlu verifikasi nama tabel/kolom sumber di `dataku2026` (masih tebakan), lalu deploy + setup Cron Trigger. **Konsekuensi selama ditunda**: pelaporan pelanggaran oleh pegawai HRIS (`pelapor_sumber='hris'`) tidak bisa dicatat di DIS — FK ke `pegawai_hris_referensi` akan menolak semua nilai selama tabel itu kosong. Pencatatan pelanggaran untuk sementara hanya bisa pakai `pelapor_sumber='dis'`.
+5. **DITUNDA:** deploy job sinkronisasi HRIS — lihat README di `supabase/functions/sync-pegawai-hris/`.
 6. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
-7. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — saya pilih tetap CASCADE karena tabel relasi murni, tapi ini keputusan saya sendiri, bukan instruksi eksplisit.
-8. **Beri tahu tim pengembang aplikasi**: dengan RESTRICT universal, UI TIDAK BOLEH punya tombol hard-delete santri — hanya perubahan status. Juga: form catat pelanggaran WAJIB minta `tahun_ajaran`.
-9. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
-10. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga).
+7. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — keputusan saya sendiri, bisa dikoreksi.
+8. **Beri tahu tim pengembang aplikasi**: RESTRICT universal → UI tidak boleh hard-delete santri/wali/user staf. Form pelanggaran wajib `tahun_ajaran`.
+9. **Rancang tabel penugasan ustadz↔kelas/mapel** — blocker untuk RLS ustadz yang benar (sekarang masih SELECT umum tanpa batasan kelas, schema_019).
+10. **Putuskan alur signup/pendaftaran akun `users`** (schema_017) — siapa boleh membuat akun apa, dan mekanisme nonaktifkan akun (karena hard-delete diblokir RESTRICT).
+11. **Uji seluruh RLS ke Postgres asli** — belum pernah diverifikasi sama sekali, ini risiko besar yang sudah berulang kali jadi masalah di proyek dataku2026 (`mockDataService.js` tidak mencerminkan RLS asli).
+12. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
+13. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi.
