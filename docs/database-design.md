@@ -86,10 +86,29 @@ erDiagram
 | nama_lengkap | text | NOT NULL |
 | tanggal_lahir | date | |
 | jenis_kelamin | text | CHECK IN ('L','P') |
-| kelas_id | uuid | FK -> kelas.id |
+| ~~kelas_id~~ | — | **DIHAPUS di schema_002** — digantikan `santri_kelas_riwayat` di bawah, karena santri perlu riwayat pindah kelas, bukan satu kelas tetap (CONFIRMED 2026-09-02) |
 | status | text | CHECK IN ('aktif','lulus','keluar','pindah'), default 'aktif' |
 | tanggal_masuk | date | NOT NULL |
 | created_at | timestamptz | default now() |
+
+### `kelas` (revisi schema_002)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| nama_kelas | text | NOT NULL |
+| tahun_ajaran | text | NOT NULL |
+| wali_kelas_id | uuid | FK -> users.id, belum diaktifkan (users belum ada) |
+| UNIQUE | | (nama_kelas, tahun_ajaran) |
+
+### `santri_kelas_riwayat` (baru, schema_002)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| santri_id | uuid | FK -> santri.id |
+| kelas_id | uuid | FK -> kelas.id |
+| tanggal_mulai | date | NOT NULL |
+| tanggal_selesai | date | NULL = penempatan masih aktif |
+| EXCLUDE | | rentang tanggal per santri_id tidak boleh tumpang tindih (constraint gist) |
 
 ### `wali`
 | Kolom | Tipe | Constraint |
@@ -134,14 +153,15 @@ erDiagram
 | input_oleh | uuid | FK -> users.id |
 | UNIQUE | | (santri_id, mata_pelajaran_id, semester, tahun_ajaran) |
 
-### `kehadiran`
+### `kehadiran` (revisi schema_002 — kelas_id disimpan langsung per baris, bukan di-derive dari riwayat, supaya rekap historis tetap akurat walau santri pindah kelas)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
 | santri_id | uuid | FK -> santri.id |
+| kelas_id | uuid | FK -> kelas.id (kelas santri SAAT presensi diambil) |
 | tanggal | date | NOT NULL |
 | status | text | CHECK IN ('hadir','sakit','izin','alpa') |
-| dicatat_oleh | uuid | FK -> users.id |
+| dicatat_oleh | uuid | FK -> users.id, belum diaktifkan |
 | UNIQUE | | (santri_id, tanggal) |
 
 ### `spp_tagihan` (lihat Assumptions #4)
@@ -241,15 +261,17 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 2. **Kesehatan dibatasi admin + wali santri bersangkutan saja** (ustadz tidak punya akses default) — CONFIRMED.
 3. **SPP dicatat manual**, tanpa integrasi payment gateway — CONFIRMED.
 4. **Wali bersifat optional per santri** — CONFIRMED. `santri_wali` tetap junction table terpisah (santri boleh punya 0 baris di sana), tidak ada perubahan skema. Konsekuensi: `perizinan.diajukan_oleh` tetap NOT NULL FK ke `wali.id` — **santri tanpa data wali tidak bisa punya proses perizinan sampai wali diisi** (aturan bisnis yang disengaja, bukan bug).
-5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, siap ditulis jadi migrasi SQL.
+5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, ditulis di `schema_001`.
+6. **Santri perlu riwayat pindah kelas** (bukan satu kelas tetap per tahun ajaran) — CONFIRMED. Kolom `santri.kelas_id` dari `schema_001` **dihapus** di `schema_002`, digantikan tabel `santri_kelas_riwayat`. `kelas` + `santri_kelas_riwayat` + `kehadiran` — **FINAL untuk v1.0**, ditulis di `schema_002`.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
 1. **Satu wali bisa punya banyak santri** (kakak-adik) — sudah diakomodasi lewat `santri_wali` many-to-many, belum eksplisit dikonfirmasi tapi konsisten dengan desain junction table.
 2. **Nilai berupa angka + predikat per mapel per semester**, tanpa komponen nilai granular (UH/UTS/UAS terpisah). Kalau butuh breakdown, `nilai` perlu tabel anak `nilai_komponen`.
 3. **Pelanggaran pakai gradasi mirip sistem lama** (Teguran Lisan → SP-3) — kalau DIS mau sistem poin akumulatif yang beda, kolom `poin` + `kategori` perlu didesain ulang.
-4. **`kelas_id` di `santri` = satu kelas tetap per tahun ajaran**, tanpa riwayat perpindahan kelas — perlu dikonfirmasi sebelum migrasi Kehadiran/Nilai (keduanya bergantung pada `kelas_id` saat ini).
+4. ~~`kelas_id` di `santri`...~~ — **SELESAI, lihat keputusan #6 di atas.**
 5. **Tidak ada kolom alamat/domisili** di `santri`/`wali` — relevan untuk modul Perizinan (verifikasi izin pulang), belum diputuskan.
+6. **Nilai** akan menghadapi pertanyaan riwayat-kelas yang sama seperti Kehadiran (nilai per santri per mapel per semester — mapel diampu ustadz per kelas yang mana kalau santri pindah kelas di tengah semester?). Belum dibahas, akan muncul lagi saat modul Nilai digarap.
 
 ## Dependencies
 
