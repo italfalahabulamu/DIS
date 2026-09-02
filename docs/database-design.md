@@ -31,7 +31,7 @@ punya akun login terpisah di v0.1 (lihat Assumptions #1).
 4. `users` — akun login (admin, ustadz, keuangan_spp, wali)
 5. `kelas` — rombongan belajar / kelas
 6. `mata_pelajaran` — daftar mapel (FINAL, diambil dari blanko_ijazah.xlsm sheet "Leger 2026")
-7. `nilai` — nilai santri per mapel per semester
+7. `nilai` — nilai santri per mapel per semester (FINAL, schema_004)
 8. `kehadiran` — presensi harian santri
 9. `spp_tagihan` — tagihan SPP per santri per periode
 10. `spp_pembayaran` — pembayaran atas tagihan
@@ -149,7 +149,7 @@ erDiagram
 
 Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 
-### `nilai` (lihat Assumptions #3)
+### `nilai` (FINAL — schema_004, tanggal 2026-09-02)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
@@ -157,11 +157,17 @@ Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 | mata_pelajaran_id | uuid | FK -> mata_pelajaran.id |
 | semester | text | CHECK IN ('ganjil','genap') |
 | tahun_ajaran | text | NOT NULL |
+| kelas_id | uuid | FK -> kelas.id, snapshot kelas TERBARU santri saat nilai disimpan (CONFIRMED) |
 | nilai_angka | numeric(5,2) | CHECK 0-100 |
-| predikat | text | nullable, mis. 'A','B','C' |
+| predikat | text | nullable, format belum distandarkan (lihat catatan predikat ijazah di bawah) |
 | catatan | text | nullable |
-| input_oleh | uuid | FK -> users.id |
+| input_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+| created_at, updated_at | timestamptz | updated_at auto-update via trigger |
 | UNIQUE | | (santri_id, mata_pelajaran_id, semester, tahun_ajaran) |
+
+**Keputusan pindah kelas tengah semester (CONFIRMED 2026-09-02):** nilai dicatat di kelas TERBARU santri, bukan dipecah per kelas lama/baru. `kelas_id` adalah snapshot, diisi aplikasi dari `santri_kelas_riwayat` (baris dengan `tanggal_selesai IS NULL`) saat nilai disimpan — **belum ada validasi level-database** yang memastikan `kelas_id` itu benar-benar salah satu kelas yang pernah/sedang ditempati santri tersebut; ini risiko yang dicatat, bukan disembunyikan.
+
+**Belum dimodelkan**: penugasan ustadz per kelas+mapel (siapa boleh input nilai apa) — menunggu tabel `users`.
 
 ### `kehadiran` (revisi schema_002 — kelas_id disimpan langsung per baris, bukan di-derive dari riwayat, supaya rekap historis tetap akurat walau santri pindah kelas)
 | Kolom | Tipe | Constraint |
@@ -273,6 +279,7 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 4. **Wali bersifat optional per santri** — CONFIRMED. `santri_wali` tetap junction table terpisah (santri boleh punya 0 baris di sana), tidak ada perubahan skema. Konsekuensi: `perizinan.diajukan_oleh` tetap NOT NULL FK ke `wali.id` — **santri tanpa data wali tidak bisa punya proses perizinan sampai wali diisi** (aturan bisnis yang disengaja, bukan bug).
 5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, ditulis di `schema_001`.
 6. **Santri perlu riwayat pindah kelas** (bukan satu kelas tetap per tahun ajaran) — CONFIRMED. Kolom `santri.kelas_id` dari `schema_001` **dihapus** di `schema_002`, digantikan tabel `santri_kelas_riwayat`. `kelas` + `santri_kelas_riwayat` + `kehadiran` — **FINAL untuk v1.0**, ditulis di `schema_002`.
+7. **Nilai saat santri pindah kelas tengah semester**: dicatat di kelas TERBARU santri, bukan dipecah per kelas — CONFIRMED. `nilai` — **FINAL untuk v1.0**, ditulis di `schema_004`.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -290,7 +297,6 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 - **Predikat & rata-rata di contoh sumber adalah nilai hardcode, bukan hasil formula otomatis** — kalau DIS mau menghitung predikat otomatis dari rata-rata, ambang batas tiap tingkat belum diketahui dari file ini, perlu ditanyakan terpisah.
 - **Ada data "Lulus KEMMAS" (hafalan Qur'an)** yang mungkin masuk kategori Prestasi (sub-kategori tahfizh) — belum dipetakan ke skema Pelanggaran & Prestasi.
 - **Data historis (sheet "Perkelas", tahun ajaran 2022-2023) pakai skala nilai 0-10**, sementara skema `nilai` saat ini asumsi skala 0-100. Kalau data lama itu perlu diimpor, butuh keputusan normalisasi skala terpisah.
-7. **Nilai** akan menghadapi pertanyaan riwayat-kelas yang sama seperti Kehadiran (nilai per santri per mapel per semester — mapel diampu ustadz per kelas yang mana kalau santri pindah kelas di tengah semester?). Belum dibahas, akan muncul lagi saat modul Nilai digarap.
 
 ## Dependencies
 
