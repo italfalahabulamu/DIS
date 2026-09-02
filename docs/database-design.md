@@ -30,7 +30,7 @@ punya akun login terpisah di v0.1 (lihat Assumptions #1).
 3. `santri_wali` — relasi many-to-many santri ↔ wali
 4. `users` — akun login (admin, ustadz, keuangan_spp, wali)
 5. `kelas` — rombongan belajar / kelas
-6. `mata_pelajaran` — daftar mapel
+6. `mata_pelajaran` — daftar mapel (FINAL, diambil dari blanko_ijazah.xlsm sheet "Leger 2026")
 7. `nilai` — nilai santri per mapel per semester
 8. `kehadiran` — presensi harian santri
 9. `spp_tagihan` — tagihan SPP per santri per periode
@@ -86,10 +86,29 @@ erDiagram
 | nama_lengkap | text | NOT NULL |
 | tanggal_lahir | date | |
 | jenis_kelamin | text | CHECK IN ('L','P') |
-| kelas_id | uuid | FK -> kelas.id |
+| ~~kelas_id~~ | — | **DIHAPUS di schema_002** — digantikan `santri_kelas_riwayat` di bawah, karena santri perlu riwayat pindah kelas, bukan satu kelas tetap (CONFIRMED 2026-09-02) |
 | status | text | CHECK IN ('aktif','lulus','keluar','pindah'), default 'aktif' |
 | tanggal_masuk | date | NOT NULL |
 | created_at | timestamptz | default now() |
+
+### `kelas` (revisi schema_002)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| nama_kelas | text | NOT NULL |
+| tahun_ajaran | text | NOT NULL |
+| wali_kelas_id | uuid | FK -> users.id, belum diaktifkan (users belum ada) |
+| UNIQUE | | (nama_kelas, tahun_ajaran) |
+
+### `santri_kelas_riwayat` (baru, schema_002)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| santri_id | uuid | FK -> santri.id |
+| kelas_id | uuid | FK -> kelas.id |
+| tanggal_mulai | date | NOT NULL |
+| tanggal_selesai | date | NULL = penempatan masih aktif |
+| EXCLUDE | | rentang tanggal per santri_id tidak boleh tumpang tindih (constraint gist) |
 
 ### `wali`
 | Kolom | Tipe | Constraint |
@@ -114,11 +133,21 @@ erDiagram
 | tahun_ajaran | text | NOT NULL, mis. '2026/2027' |
 | wali_kelas_id | uuid | FK -> users.id (role ustadz) |
 
-### `mata_pelajaran`
+### `mata_pelajaran` (FINAL — sumber: `blanko_ijazah.xlsm`, sheet "Leger 2026", baris header + baris KKM)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
-| nama_mapel | text | NOT NULL |
+| urutan | integer | NOT NULL, UNIQUE (urutan cetak asli 1-39, dipakai supaya urutan di ijazah/transkrip konsisten) |
+| nama_mapel | text | NOT NULL, UNIQUE |
+| kkm | integer | NOT NULL, CHECK 0-100 |
+| kategori | text | CHECK IN ('agama','umum'), nullable — INFERENSI dari pengelompokan KKM di sumber, BUKAN label eksplisit di file. Perlu dikonfirmasi. |
+
+**39 baris seed data** (urutan, nama, KKM):
+1-23 KKM 60 (kelompok agama/Arab + Grammar): Al-Qur'an, Bahasa Arab, Imla', Khat, Mahfudhat, Muthalaah, Sharf, Sejarah Kebudayaan Islam, Tajwid, Balaghah, Fiqh, Hadits, Musthalahul Hadits, Nahwu, Tafsir, Tauhid, Ulumul Qur'an, Ushul Fiqh, Fathul Kutub, Kasyful Mu'jam, Tajhiz Mayat, Samadiyah, Grammar.
+24 KKM 65: Bahasa Jerman (satu-satunya di luar pola 60/75 — tidak ada penjelasan di file kenapa).
+25-39 KKM 75 (kelompok umum): Bahasa Indonesia, Bahasa Inggris, Bahasa Arab (TL), Bahasa Inggris (TL), Biologi, Fisika, Kimia, Ekonomi, Sosiologi, Matematika, PAI, PJOK, PKN, Sejarah, Seni Budaya.
+
+Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 
 ### `nilai` (lihat Assumptions #3)
 | Kolom | Tipe | Constraint |
@@ -134,14 +163,15 @@ erDiagram
 | input_oleh | uuid | FK -> users.id |
 | UNIQUE | | (santri_id, mata_pelajaran_id, semester, tahun_ajaran) |
 
-### `kehadiran`
+### `kehadiran` (revisi schema_002 — kelas_id disimpan langsung per baris, bukan di-derive dari riwayat, supaya rekap historis tetap akurat walau santri pindah kelas)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
 | santri_id | uuid | FK -> santri.id |
+| kelas_id | uuid | FK -> kelas.id (kelas santri SAAT presensi diambil) |
 | tanggal | date | NOT NULL |
 | status | text | CHECK IN ('hadir','sakit','izin','alpa') |
-| dicatat_oleh | uuid | FK -> users.id |
+| dicatat_oleh | uuid | FK -> users.id, belum diaktifkan |
 | UNIQUE | | (santri_id, tanggal) |
 
 ### `spp_tagihan` (lihat Assumptions #4)
@@ -241,15 +271,26 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 2. **Kesehatan dibatasi admin + wali santri bersangkutan saja** (ustadz tidak punya akses default) — CONFIRMED.
 3. **SPP dicatat manual**, tanpa integrasi payment gateway — CONFIRMED.
 4. **Wali bersifat optional per santri** — CONFIRMED. `santri_wali` tetap junction table terpisah (santri boleh punya 0 baris di sana), tidak ada perubahan skema. Konsekuensi: `perizinan.diajukan_oleh` tetap NOT NULL FK ke `wali.id` — **santri tanpa data wali tidak bisa punya proses perizinan sampai wali diisi** (aturan bisnis yang disengaja, bukan bug).
-5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, siap ditulis jadi migrasi SQL.
+5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, ditulis di `schema_001`.
+6. **Santri perlu riwayat pindah kelas** (bukan satu kelas tetap per tahun ajaran) — CONFIRMED. Kolom `santri.kelas_id` dari `schema_001` **dihapus** di `schema_002`, digantikan tabel `santri_kelas_riwayat`. `kelas` + `santri_kelas_riwayat` + `kehadiran` — **FINAL untuk v1.0**, ditulis di `schema_002`.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
 1. **Satu wali bisa punya banyak santri** (kakak-adik) — sudah diakomodasi lewat `santri_wali` many-to-many, belum eksplisit dikonfirmasi tapi konsisten dengan desain junction table.
 2. **Nilai berupa angka + predikat per mapel per semester**, tanpa komponen nilai granular (UH/UTS/UAS terpisah). Kalau butuh breakdown, `nilai` perlu tabel anak `nilai_komponen`.
 3. **Pelanggaran pakai gradasi mirip sistem lama** (Teguran Lisan → SP-3) — kalau DIS mau sistem poin akumulatif yang beda, kolom `poin` + `kategori` perlu didesain ulang.
-4. **`kelas_id` di `santri` = satu kelas tetap per tahun ajaran**, tanpa riwayat perpindahan kelas — perlu dikonfirmasi sebelum migrasi Kehadiran/Nilai (keduanya bergantung pada `kelas_id` saat ini).
+4. ~~`kelas_id` di `santri`...~~ — **SELESAI, lihat keputusan #6 di atas.**
 5. **Tidak ada kolom alamat/domisili** di `santri`/`wali` — relevan untuk modul Perizinan (verifikasi izin pulang), belum diputuskan.
+6. **Format `kelas.nama_kelas` terkonfirmasi dari `blanko_ijazah.xlsm`**: pola "tingkat-rombel" (mis. "6-A", "6-B") — tapi ini TIDAK menjawab soal riwayat pindah kelas (poin #4), cuma format penamaannya.
+
+## Temuan tambahan dari `blanko_ijazah.xlsm` (belum ditindaklanjuti, dicatat supaya tidak hilang)
+
+- **Entitas `ijazah` belum ada di skema** — Nomor Ijazah, Tanggal Kelulusan, Predikat kelulusan adalah dokumen tersendiri dengan siklus hidup beda dari `nilai` per-mapel. Perlu tabel baru saat modul Nilai/Kelulusan digarap.
+- **Predikat kelulusan ternyata 4 tingkat tetap**: ISTIMEWA / SANGAT BAIK / BAIK / CUKUP (dengan padanan Arab) — ini seharusnya jadi CHECK constraint di kolom predikat, bukan teks bebas seperti asumsi awal saya.
+- **Predikat & rata-rata di contoh sumber adalah nilai hardcode, bukan hasil formula otomatis** — kalau DIS mau menghitung predikat otomatis dari rata-rata, ambang batas tiap tingkat belum diketahui dari file ini, perlu ditanyakan terpisah.
+- **Ada data "Lulus KEMMAS" (hafalan Qur'an)** yang mungkin masuk kategori Prestasi (sub-kategori tahfizh) — belum dipetakan ke skema Pelanggaran & Prestasi.
+- **Data historis (sheet "Perkelas", tahun ajaran 2022-2023) pakai skala nilai 0-10**, sementara skema `nilai` saat ini asumsi skala 0-100. Kalau data lama itu perlu diimpor, butuh keputusan normalisasi skala terpisah.
+6. **Nilai** akan menghadapi pertanyaan riwayat-kelas yang sama seperti Kehadiran (nilai per santri per mapel per semester — mapel diampu ustadz per kelas yang mana kalau santri pindah kelas di tengah semester?). Belum dibahas, akan muncul lagi saat modul Nilai digarap.
 
 ## Dependencies
 
