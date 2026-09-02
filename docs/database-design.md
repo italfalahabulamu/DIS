@@ -290,7 +290,7 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 - **Predikat & rata-rata di contoh sumber adalah nilai hardcode, bukan hasil formula otomatis** — kalau DIS mau menghitung predikat otomatis dari rata-rata, ambang batas tiap tingkat belum diketahui dari file ini, perlu ditanyakan terpisah.
 - **Ada data "Lulus KEMMAS" (hafalan Qur'an)** yang mungkin masuk kategori Prestasi (sub-kategori tahfizh) — belum dipetakan ke skema Pelanggaran & Prestasi.
 - **Data historis (sheet "Perkelas", tahun ajaran 2022-2023) pakai skala nilai 0-10**, sementara skema `nilai` saat ini asumsi skala 0-100. Kalau data lama itu perlu diimpor, butuh keputusan normalisasi skala terpisah.
-6. **Nilai** akan menghadapi pertanyaan riwayat-kelas yang sama seperti Kehadiran (nilai per santri per mapel per semester — mapel diampu ustadz per kelas yang mana kalau santri pindah kelas di tengah semester?). Belum dibahas, akan muncul lagi saat modul Nilai digarap.
+7. **Nilai** akan menghadapi pertanyaan riwayat-kelas yang sama seperti Kehadiran (nilai per santri per mapel per semester — mapel diampu ustadz per kelas yang mana kalau santri pindah kelas di tengah semester?). Belum dibahas, akan muncul lagi saat modul Nilai digarap.
 
 ## Dependencies
 
