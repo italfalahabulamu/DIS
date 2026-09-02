@@ -241,6 +241,24 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 
 **Belum dikonfirmasi:** Assumption #3 lama (gradasi tetap vs poin akumulatif) — struktur di atas mendukung penghitungan poin manual/aplikasi, TAPI tidak ada trigger otomatis SP1→SP2→SP3 dari akumulasi poin karena ambang batasnya belum diberikan.
 
+### `pengaturan_ambang_pelanggaran` (baru, schema_013, Tahap 14 — "setting sistem" Model B, CONFIRMED)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| kategori | text | CHECK IN (5 gradasi), UNIQUE |
+| ambang_poin_minimum | integer | NOT NULL, CHECK >= 0 |
+| keterangan | text | nullable |
+| updated_at | timestamptz | auto-update via trigger |
+| diubah_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+
+**Tabel KOSONG saat migrasi dibuat** — angka ambang batas (berapa poin untuk SP1/SP2/SP3) belum diisi, harus diatur pengguna via aplikasi. Fungsi `hitung_status_akumulasi_pelanggaran()` mengembalikan NULL selama tabel ini kosong.
+
+**Fungsi & view pendukung Model B (CONFIRMED 2026-09-02 — "gunakan model B yang dapat dimodifikasi di setting sistem"):**
+- `hitung_status_akumulasi_pelanggaran(total_poin integer) → text` — membaca ambang batas dari tabel di atas (bukan hardcode), mengembalikan kategori tertinggi yang tercapai.
+- `v_akumulasi_poin_santri` — view real-time: total poin + status akumulasi per santri, dihitung langsung dari `pelanggaran` + pengaturan terkini (bukan kolom cache yang bisa basi).
+
+**Belum dikonfirmasi:** akumulasi bersifat ALL-TIME (tidak direset per tahun ajaran/semester) karena `pelanggaran` tidak punya kolom `tahun_ajaran`. Kalau kebijakan pesantren adalah reset tahunan, perlu revisi struktur tambahan.
+
 ### `prestasi` (DRAFT→SQL, schema_006, Tahap 7)
 | Kolom | Tipe | Constraint |
 |---|---|---|
@@ -269,7 +287,7 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 
 **`diajukan_oleh` NOT NULL** — konsekuensi dari keputusan CONFIRMED #4 (wali optional per santri): santri tanpa wali tidak bisa punya proses perizinan. Ini disengaja, bukan bug.
 
-**Belum final:** ~~`diajukan_oleh` pakai `ON DELETE CASCADE`~~ — **DIREVISI ke `ON DELETE RESTRICT` di schema_011 (Tahap 12)**, konsisten dengan `spp_pembayaran.tagihan_id`. Prinsip yang dipakai (final): FK ke `santri.id` tetap CASCADE di semua tabel (santri = subjek utama), FK ke entitas aktor/wadah seperti `wali.id`/`spp_tagihan.id` pakai RESTRICT (mencegah riwayat administratif terhapus diam-diam). Konsekuensi: aplikasi butuh fitur arsip/soft-delete untuk wali kalau operasi hapus dibutuhkan — belum ada strukturnya, dicatat sebagai gap terpisah.
+**Revisi ON DELETE — sekarang bagian dari kebijakan RESTRICT universal (CONFIRMED 2026-09-02, schema_012):** `santri_id` DAN `diajukan_oleh` sama-sama RESTRICT. Prinsip lama saya (CASCADE untuk santri_id) sudah **digantikan** instruksi eksplisit pengguna — lihat Keputusan #12.
 
 ### `kesehatan` (DRAFT→SQL, schema_008, Tahap 9 — data sensitif, PROFIL STATIS)
 | Kolom | Tipe | Constraint |
@@ -337,10 +355,12 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 8. **SPP dicatat manual** (keputusan #3 di atas) — `spp_tagihan` + `spp_pembayaran` ditulis SQL di `schema_005` (Tahap 6), TAPI **belum sepenuhnya FINAL**: dua pilihan desain (ON DELETE RESTRICT di `tagihan_id`, dan tidak adanya perhitungan status otomatis) adalah keputusan saya sendiri saat menulis migrasi, bukan hasil konfirmasi eksplisit — perlu direview sebelum dianggap selesai seperti modul lain.
 9. **Kesehatan dibatasi admin + wali santri bersangkutan** (keputusan #2 di atas) — `kesehatan` ditulis SQL di `schema_008` (Tahap 9), akses ustadz sengaja dikecualikan sesuai konfirmasi. TAPI struktur "hanya snapshot terkini tanpa riwayat" adalah pembacaan saya atas draft, belum dikonfirmasi eksplisit.
 10. **`pelanggaran`, `prestasi`, `perizinan` ditulis SQL** di `schema_006`/`schema_007` (Tahap 7-8) — status DRAFT→SQL, bukan FINAL.
-11. **Revisi 2026-09-02 (diskusi lanjutan):**
-    - `perizinan.diajukan_oleh`: **ON DELETE RESTRICT** (bukan CASCADE) — schema_011, Tahap 12. Prinsip final: FK ke `santri.id` tetap CASCADE (santri = subjek utama tabel), FK ke entitas aktor/wadah (`wali.id`, `spp_tagihan.id`) pakai RESTRICT.
-    - `pelanggaran` DIREVISI (schema_009, Tahap 10): + tabel referensi `jenis_pelanggaran` (katalog bentuk pelanggaran, kosong — data belum diisi) + kolom pelapor lintas-sistem (`pelapor_sumber`, `pelapor_nama`, `pelapor_hris_employee_id` sebagai referensi LUNAK ke HRIS `dataku2026` — TANPA FK asli karena beda project Supabase). Assumption #3 (gradasi vs poin akumulatif) masih **belum terjawab tuntas** — struktur mendukung poin manual, tapi ambang batas otomatis SP1/2/3 belum ada.
+11. **Revisi 2026-09-02 (diskusi lanjutan) — DIREVISI LAGI di poin #12:**
+    - ~~`perizinan.diajukan_oleh`: ON DELETE RESTRICT~~ — lihat #12, sekarang bagian dari kebijakan RESTRICT universal.
+    - `pelanggaran` DIREVISI (schema_009, Tahap 10): + tabel referensi `jenis_pelanggaran` (katalog bentuk pelanggaran, kosong — data belum diisi) + kolom pelapor lintas-sistem (`pelapor_sumber`, `pelapor_nama`, `pelapor_hris_employee_id` sebagai referensi LUNAK ke HRIS `dataku2026` — TANPA FK asli karena beda project Supabase).
     - `kesehatan_riwayat` ditambahkan (schema_010, Tahap 11) — rekam medik per-episode (keluhan + penanganan + status), melengkapi `kesehatan` yang tetap jadi profil statis. Nilai `status` masih tebakan, belum dikonfirmasi.
+12. **RESTRICT universal (CONFIRMED 2026-09-02, schema_012, Tahap 13):** instruksi eksplisit pengguna "gunakan RESTRICT" — SEMUA FK ke `santri.id` di semua tabel diubah dari CASCADE menjadi RESTRICT (kecuali `santri_wali`, tabel relasi murni, tetap CASCADE — pilihan saya sendiri, bisa dikoreksi). **Konsekuensi praktis:** santri yang sudah punya data di tabel manapun TIDAK BISA di-hard-delete — satu-satunya cara "menghapus" santri adalah mengubah kolom `status` (`keluar`/`lulus`/`pindah`). Aplikasi tidak boleh punya tombol hard-delete santri.
+13. **Model B poin akumulatif (CONFIRMED 2026-09-02, schema_013, Tahap 14):** instruksi eksplisit pengguna "gunakan model B yang dapat dimodifikasi di setting sistem" — menjawab Assumption #3 lama. Ambang batas poin (kapan status jadi SP1/SP2/SP3) disimpan di tabel `pengaturan_ambang_pelanggaran` yang bisa diubah admin lewat aplikasi, BUKAN hardcode. Status akumulasi dihitung real-time via fungsi + view (`v_akumulasi_poin_santri`), bukan kolom tersimpan. **Tabel ambang batas sengaja kosong** — angka nyata (berapa poin untuk SP1/2/3) belum diisi, sama prinsip dengan `jenis_pelanggaran`.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -371,13 +391,16 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 
 ## Next Actions
 
-**Status per 2026-09-02: 11 migrasi ditulis (schema_001 s/d schema_011, 16 tabel).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
+**Status per 2026-09-02: 14 migrasi ditulis (schema_001 s/d schema_013, 18 tabel + 1 view + 2 fungsi).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
 
 1. Konfirmasi/koreksi 6 asumsi lama (santri/wali/kelas — sudah lama tertunda).
 2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — tidak ada trigger status otomatis.
-3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin. Sengaja dikosongkan, bukan dikarang.
-4. **Jawab tuntas Assumption #3**: apakah status SP1/SP2/SP3 dihitung otomatis dari akumulasi poin (perlu ambang batas per tingkat), atau tetap manual per kejadian seperti sekarang.
-5. **Putuskan mekanisme integrasi HRIS untuk pelapor** (schema_009) — API call validasi real-time, sinkronisasi berkala daftar pegawai ke DIS, atau tetap snapshot free-text seperti sekarang. Ini keputusan arsitektur (Software Architect), bukan sekadar skema database.
-6. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
-7. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
-8. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga — termasuk `users` DIS terpisah dari `users`/auth di dataku2026).
+3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin.
+4. **Isi angka `pengaturan_ambang_pelanggaran`** (schema_013) — berapa poin untuk SP1/SP2/SP3. Model B sudah dikonfirmasi, tapi tabel ambang batas masih kosong.
+5. **Konfirmasi periode akumulasi poin**: all-time (sekarang) atau reset per tahun ajaran/semester? Kalau reset, perlu kolom `tahun_ajaran` tambahan di `pelanggaran` + revisi `v_akumulasi_poin_santri`.
+6. **Putuskan mekanisme integrasi HRIS untuk pelapor** (schema_009) — API call validasi real-time, sinkronisasi berkala daftar pegawai ke DIS, atau tetap snapshot free-text seperti sekarang. Ini keputusan arsitektur (Software Architect), bukan sekadar skema database.
+7. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
+8. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — saya pilih tetap CASCADE karena tabel relasi murni, tapi ini keputusan saya sendiri, bukan instruksi eksplisit.
+9. **Beri tahu tim pengembang aplikasi**: dengan RESTRICT universal, UI TIDAK BOLEH punya tombol hard-delete santri — hanya perubahan status.
+10. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
+11. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga).
