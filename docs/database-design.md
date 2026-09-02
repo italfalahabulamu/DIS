@@ -35,10 +35,12 @@ punya akun login terpisah di v0.1 (lihat Assumptions #1).
 8. `kehadiran` — presensi harian santri
 9. `spp_tagihan` — tagihan SPP per santri per periode (DRAFT→SQL, schema_005, Tahap 6 — 2 keputusan belum dikonfirmasi, lihat catatan di bawah)
 10. `spp_pembayaran` — pembayaran atas tagihan (DRAFT→SQL, schema_005, Tahap 6)
-11. `pelanggaran` — catatan pelanggaran (gradasi poin) (DRAFT→SQL, schema_006, Tahap 7 — Assumption #3 belum dikonfirmasi)
+11. `pelanggaran` — catatan pelanggaran (DIREVISI Tahap 10, schema_009: + jenis_pelanggaran + pelapor lintas-HRIS)
+11a. `jenis_pelanggaran` — katalog bentuk pelanggaran (baru, schema_009 — kosong, data belum diisi)
 12. `prestasi` — catatan prestasi (akademik/non-akademik) (DRAFT→SQL, schema_006, Tahap 7)
-13. `perizinan` — pengajuan izin/cuti santri (DRAFT→SQL, schema_007, Tahap 8 — keputusan ON DELETE belum final)
-14. `kesehatan` — riwayat kesehatan santri, data sensitif (DRAFT→SQL, schema_008, Tahap 9 — hanya snapshot terkini, tanpa riwayat perubahan)
+13. `perizinan` — pengajuan izin/cuti santri (DRAFT→SQL, schema_007, Tahap 8; ON DELETE direvisi ke RESTRICT di schema_011, Tahap 12)
+14. `kesehatan` — profil kesehatan statis santri, data sensitif (DRAFT→SQL, schema_008, Tahap 9)
+14a. `kesehatan_riwayat` — rekam medik per-episode (baru, schema_010, Tahap 11 — status ASUMSI belum dikonfirmasi)
 
 ## Entity-Relationship Diagram
 
@@ -207,18 +209,37 @@ Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 
 Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yang dilakukan hanya pengecekan sintaks kasar (keseimbangan tanda kurung), bukan eksekusi nyata.
 
-### `pelanggaran` (DRAFT→SQL, schema_006, Tahap 7 — lihat Assumptions #3, BELUM dikonfirmasi)
+### `jenis_pelanggaran` (baru, schema_009, Tahap 10)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| nama | text | NOT NULL, UNIQUE |
+| deskripsi | text | nullable |
+| kategori | text | CHECK IN ('teguran_lisan','teguran_tertulis','sp1','sp2','sp3') |
+| poin_default | integer | NOT NULL, CHECK >= 0 |
+| aktif | boolean | default true |
+
+**Tabel KOSONG saat migrasi dibuat** — daftar bentuk pelanggaran nyata pesantren (beserta poin) belum diisi. Sengaja tidak dikarang, sama seperti prinsip `mata_pelajaran` yang datanya diambil persis dari sumber asli.
+
+### `pelanggaran` (DIREVISI Tahap 10, schema_009 — menggantikan versi schema_006)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
 | santri_id | uuid | FK -> santri.id, ON DELETE CASCADE |
+| jenis_pelanggaran_id | uuid | FK -> jenis_pelanggaran.id, ON DELETE RESTRICT, NOT NULL |
 | tanggal | date | NOT NULL |
-| kategori | text | CHECK IN ('teguran_lisan','teguran_tertulis','sp1','sp2','sp3') |
-| poin | integer | NOT NULL, CHECK >= 0, tanpa validasi rentang per kategori |
-| deskripsi | text | |
-| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+| kategori | text | snapshot dari jenis_pelanggaran.kategori saat dicatat |
+| poin | integer | snapshot/override dari jenis_pelanggaran.poin_default |
+| deskripsi | text | catatan spesifik kejadian ini |
+| pelapor_sumber | text | CHECK IN ('dis','hris'), NOT NULL |
+| pelapor_nama | text | NOT NULL — snapshot nama pelapor |
+| pelapor_dis_user_id | uuid | FK -> users.id (DIS), BELUM diaktifkan |
+| pelapor_hris_employee_id | text | referensi LUNAK ke ID pegawai dataku2026 — **TANPA FK asli** |
+| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan (beda dari pelapor — lihat catatan) |
 
-**Belum dikonfirmasi:** gradasi tetap 5 kategori ini langsung ditulis dari Assumption #3 (belum pernah dikonfirmasi eksplisit). Tidak ada trigger yang menghitung kenaikan SP1→SP2→SP3 otomatis dari akumulasi poin — kalau DIS butuh itu, perlu keputusan bisnis + migrasi tambahan.
+**Keterbatasan teknis penting:** DIS dan `dataku2026` (HRIS) adalah dua project Supabase terpisah — FK Postgres tidak bisa lintas database. `pelapor_hris_employee_id` karena itu adalah **snapshot**, bukan referensi tervalidasi real-time. Integrasi nyata (validasi ID pegawai saat input, atau sinkronisasi berkala) **belum diputuskan** — perlu keputusan arsitektur terpisah, bukan sesuatu yang bisa diputuskan di level skema database saja.
+
+**Belum dikonfirmasi:** Assumption #3 lama (gradasi tetap vs poin akumulatif) — struktur di atas mendukung penghitungan poin manual/aplikasi, TAPI tidak ada trigger otomatis SP1→SP2→SP3 dari akumulasi poin karena ambang batasnya belum diberikan.
 
 ### `prestasi` (DRAFT→SQL, schema_006, Tahap 7)
 | Kolom | Tipe | Constraint |
@@ -248,9 +269,9 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 
 **`diajukan_oleh` NOT NULL** — konsekuensi dari keputusan CONFIRMED #4 (wali optional per santri): santri tanpa wali tidak bisa punya proses perizinan. Ini disengaja, bukan bug.
 
-**Belum final:** `diajukan_oleh` pakai `ON DELETE CASCADE` mengikuti pola `wali_id` di `santri_wali` (schema_001) — TAPI ini punya trade-off yang sama persis dengan alasan `ON DELETE RESTRICT` dipilih untuk `spp_pembayaran.tagihan_id` (schema_005): kehilangan riwayat/jejak kalau parent row dihapus. Dua kasus ini belum diputuskan secara konsisten dan perlu direview bersama.
+**Belum final:** ~~`diajukan_oleh` pakai `ON DELETE CASCADE`~~ — **DIREVISI ke `ON DELETE RESTRICT` di schema_011 (Tahap 12)**, konsisten dengan `spp_pembayaran.tagihan_id`. Prinsip yang dipakai (final): FK ke `santri.id` tetap CASCADE di semua tabel (santri = subjek utama), FK ke entitas aktor/wadah seperti `wali.id`/`spp_tagihan.id` pakai RESTRICT (mencegah riwayat administratif terhapus diam-diam). Konsekuensi: aplikasi butuh fitur arsip/soft-delete untuk wali kalau operasi hapus dibutuhkan — belum ada strukturnya, dicatat sebagai gap terpisah.
 
-### `kesehatan` (DRAFT→SQL, schema_008, Tahap 9 — data sensitif, lihat Assumptions #6)
+### `kesehatan` (DRAFT→SQL, schema_008, Tahap 9 — data sensitif, PROFIL STATIS)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | santri_id | uuid | PK, FK -> santri.id, ON DELETE CASCADE |
@@ -263,7 +284,22 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 
 **Akses dibatasi admin + wali santri bersangkutan SAJA** (ustadz TIDAK otomatis punya akses) — CONFIRMED 2026-09-02, keputusan #2.
 
-**Gap yang belum dikonfirmasi:** tabel ini hanya menyimpan kondisi TERKINI (1 baris per santri, `updated_at` menimpa nilai lama) — TIDAK ada riwayat perubahan dari waktu ke waktu. Draft manapun tidak menyebutkan kebutuhan riwayat, jadi ini bukan bug, tapi kemungkinan gap yang perlu dikonfirmasi sebelum dianggap final.
+Tabel ini adalah **profil statis** (1 baris per santri, ditimpa saat update) — untuk riwayat kejadian sakit dari waktu ke waktu, lihat `kesehatan_riwayat` di bawah (Tahap 11, menjawab permintaan "semacam rekam medik").
+
+### `kesehatan_riwayat` (baru, schema_010, Tahap 11 — rekam medik per-episode)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| id | uuid | PK |
+| santri_id | uuid | FK -> santri.id, ON DELETE CASCADE |
+| tanggal | date | NOT NULL |
+| keluhan | text | NOT NULL — gejala/keluhan/diagnosa awal |
+| penanganan | text | nullable — tindakan yang diberikan |
+| status | text | CHECK IN ('ditangani','dirujuk','rawat_inap','dalam_pemantauan','sembuh'), default 'ditangani' |
+| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+
+**DATA SENSITIF**, akses sama seperti `kesehatan` (admin + wali santri bersangkutan saja, ustadz dikecualikan).
+
+**Belum dikonfirmasi:** daftar nilai `status` adalah tebakan saya dari alur umum UKS/klinik sekolah — **bukan** kebijakan Al-Falah yang terverifikasi, perlu dikoreksi.
 
 ## Indexing Strategy
 
@@ -300,7 +336,11 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 7. **Nilai saat santri pindah kelas tengah semester**: dicatat di kelas TERBARU santri, bukan dipecah per kelas — CONFIRMED. `nilai` — **FINAL untuk v1.0**, ditulis di `schema_004`.
 8. **SPP dicatat manual** (keputusan #3 di atas) — `spp_tagihan` + `spp_pembayaran` ditulis SQL di `schema_005` (Tahap 6), TAPI **belum sepenuhnya FINAL**: dua pilihan desain (ON DELETE RESTRICT di `tagihan_id`, dan tidak adanya perhitungan status otomatis) adalah keputusan saya sendiri saat menulis migrasi, bukan hasil konfirmasi eksplisit — perlu direview sebelum dianggap selesai seperti modul lain.
 9. **Kesehatan dibatasi admin + wali santri bersangkutan** (keputusan #2 di atas) — `kesehatan` ditulis SQL di `schema_008` (Tahap 9), akses ustadz sengaja dikecualikan sesuai konfirmasi. TAPI struktur "hanya snapshot terkini tanpa riwayat" adalah pembacaan saya atas draft, belum dikonfirmasi eksplisit.
-10. **`pelanggaran`, `prestasi`, `perizinan` ditulis SQL** di `schema_006`/`schema_007` (Tahap 7-8) — status DRAFT→SQL, bukan FINAL. `pelanggaran` masih pakai Assumption #3 yang belum dikonfirmasi; `perizinan.diajukan_oleh` punya keputusan ON DELETE yang belum konsisten dengan pola RESTRICT di SPP (lihat catatan di bagian schema masing-masing).
+10. **`pelanggaran`, `prestasi`, `perizinan` ditulis SQL** di `schema_006`/`schema_007` (Tahap 7-8) — status DRAFT→SQL, bukan FINAL.
+11. **Revisi 2026-09-02 (diskusi lanjutan):**
+    - `perizinan.diajukan_oleh`: **ON DELETE RESTRICT** (bukan CASCADE) — schema_011, Tahap 12. Prinsip final: FK ke `santri.id` tetap CASCADE (santri = subjek utama tabel), FK ke entitas aktor/wadah (`wali.id`, `spp_tagihan.id`) pakai RESTRICT.
+    - `pelanggaran` DIREVISI (schema_009, Tahap 10): + tabel referensi `jenis_pelanggaran` (katalog bentuk pelanggaran, kosong — data belum diisi) + kolom pelapor lintas-sistem (`pelapor_sumber`, `pelapor_nama`, `pelapor_hris_employee_id` sebagai referensi LUNAK ke HRIS `dataku2026` — TANPA FK asli karena beda project Supabase). Assumption #3 (gradasi vs poin akumulatif) masih **belum terjawab tuntas** — struktur mendukung poin manual, tapi ambang batas otomatis SP1/2/3 belum ada.
+    - `kesehatan_riwayat` ditambahkan (schema_010, Tahap 11) — rekam medik per-episode (keluhan + penanganan + status), melengkapi `kesehatan` yang tetap jadi profil statis. Nilai `status` masih tebakan, belum dikonfirmasi.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -331,12 +371,13 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 
 ## Next Actions
 
-**Status per 2026-09-02: SEMUA 9 modul entity list sudah ditulis SQL** (schema_001 s/d schema_008, mencakup 14 tabel). TAPI "sudah ditulis SQL" ≠ "final/siap produksi" — lihat rincian di bawah. Belum satupun migrasi dijalankan/diuji ke Postgres asli manapun.
+**Status per 2026-09-02: 11 migrasi ditulis (schema_001 s/d schema_011, 16 tabel).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
 
-1. Konfirmasi/koreksi 6 asumsi lama di atas (santri/wali/kelas — sudah lama tertunda).
-2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — `ON DELETE RESTRICT` di `tagihan_id`, tidak ada trigger status otomatis.
-3. Konfirmasi Assumption #3 (`pelanggaran`, schema_006) — apakah gradasi 5-tingkat tetap sudah benar, atau DIS butuh sistem poin akumulatif berbeda.
-4. **Putuskan satu kebijakan ON DELETE yang konsisten** untuk FK ke entitas induk (santri/wali) di seluruh tabel riwayat/transaksional — saat ini `spp_pembayaran.tagihan_id` pakai RESTRICT sementara `perizinan.diajukan_oleh` pakai CASCADE, dengan alasan trade-off yang sama persis (kehilangan jejak riwayat). Ini butuh satu keputusan eksplisit, bukan dibiarkan berbeda per modul karena "keputusan siapa yang menulis migrasinya".
-5. Konfirmasi apakah `kesehatan` (schema_008) memang cukup snapshot terkini, atau butuh riwayat perubahan.
-6. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
-7. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth juga).
+1. Konfirmasi/koreksi 6 asumsi lama (santri/wali/kelas — sudah lama tertunda).
+2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — tidak ada trigger status otomatis.
+3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin. Sengaja dikosongkan, bukan dikarang.
+4. **Jawab tuntas Assumption #3**: apakah status SP1/SP2/SP3 dihitung otomatis dari akumulasi poin (perlu ambang batas per tingkat), atau tetap manual per kejadian seperti sekarang.
+5. **Putuskan mekanisme integrasi HRIS untuk pelapor** (schema_009) — API call validasi real-time, sinkronisasi berkala daftar pegawai ke DIS, atau tetap snapshot free-text seperti sekarang. Ini keputusan arsitektur (Software Architect), bukan sekadar skema database.
+6. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
+7. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
+8. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga — termasuk `users` DIS terpisah dari `users`/auth di dataku2026).
