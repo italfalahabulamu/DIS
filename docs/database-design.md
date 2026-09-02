@@ -237,7 +237,7 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 | pelapor_hris_employee_id | text | referensi LUNAK ke ID pegawai dataku2026 — **TANPA FK asli** |
 | dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan (beda dari pelapor — lihat catatan) |
 
-**Keterbatasan teknis penting:** DIS dan `dataku2026` (HRIS) adalah dua project Supabase terpisah — FK Postgres tidak bisa lintas database. `pelapor_hris_employee_id` karena itu adalah **snapshot**, bukan referensi tervalidasi real-time. Integrasi nyata (validasi ID pegawai saat input, atau sinkronisasi berkala) **belum diputuskan** — perlu keputusan arsitektur terpisah, bukan sesuatu yang bisa diputuskan di level skema database saja.
+**Keterbatasan teknis penting (STATUS DIREVISI — lihat schema_015 di bawah):** ~~DIS dan `dataku2026` (HRIS) adalah dua project Supabase terpisah — FK Postgres tidak bisa lintas database. `pelapor_hris_employee_id` karena itu adalah **snapshot**, bukan referensi tervalidasi real-time.~~ **Sejak schema_015 (Tahap 16, CONFIRMED 2026-09-02 "sinkron nyata secara berkala")**: kolom ini sekarang punya **FK sungguhan** ke `pegawai_hris_referensi` (tabel replika lokal, lihat di bawah) — bukan lagi teks bebas tanpa validasi. Database akan menolak ID pegawai yang tidak ada di replika lokal.
 
 **Belum dikonfirmasi:** Assumption #3 lama (gradasi tetap vs poin akumulatif) — struktur di atas mendukung penghitungan poin manual/aplikasi, TAPI tidak ada trigger otomatis SP1→SP2→SP3 dari akumulasi poin karena ambang batasnya belum diberikan.
 
@@ -258,6 +258,27 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 - `v_akumulasi_poin_santri` — view real-time: total poin + status akumulasi per santri, dihitung langsung dari `pelanggaran` + pengaturan terkini (bukan kolom cache yang bisa basi).
 
 **Belum dikonfirmasi:** akumulasi bersifat ALL-TIME (tidak direset per tahun ajaran/semester) karena `pelanggaran` tidak punya kolom `tahun_ajaran`. Kalau kebijakan pesantren adalah reset tahunan, perlu revisi struktur tambahan.
+
+**~~Belum dikonfirmasi~~ SELESAI (CONFIRMED 2026-09-02, schema_016, Tahap 17):** akumulasi RESET tiap tahun ajaran. `pelanggaran` bertambah kolom `tahun_ajaran text NOT NULL`. Status disiplin aktif dihitung via fungsi baru `hitung_akumulasi_poin_santri_tahun(tahun_ajaran)`, BUKAN lagi `v_akumulasi_poin_santri` (yang tetap ada tapi sekarang berperan sebagai ringkasan all-time/riwayat menyeluruh saja).
+
+### `pegawai_hris_referensi` (baru, schema_014, Tahap 15 — replika lokal untuk sinkronisasi HRIS, CONFIRMED)
+| Kolom | Tipe | Constraint |
+|---|---|---|
+| hris_employee_id | text | PK — format ID dataku2026, mis. "REG-20260824-4DB8ED" |
+| nama_lengkap | text | NOT NULL |
+| unit_kerja | text | nullable |
+| jabatan | text | nullable |
+| status_aktif | boolean | default true — false kalau pegawai resign/pindah, BUKAN dihapus |
+| synced_at | timestamptz | default now() |
+
+**Kenapa perlu tabel ini:** DIS dan `dataku2026` tetap dua project Supabase terpisah — Postgres tidak mendukung FK lintas database. Tabel ini adalah **salinan lokal** sebagian data pegawai HRIS, supaya `pelanggaran.pelapor_hris_employee_id` (schema_015) bisa punya FK **sungguhan** ke sini, bukan sekadar teks bebas tanpa validasi seperti sebelumnya (schema_009).
+
+**BELUM SELESAI (di luar cakupan migrasi SQL):**
+1. Job sinkronisasi terjadwal (Supabase Edge Function + Cron Trigger) yang menarik data dari `dataku2026` secara berkala dan meng-upsert ke tabel ini — **belum dibuat**, ini kode aplikasi.
+2. Endpoint di `dataku2026` yang bisa dipanggil job itu — belum ada/dikonfirmasi. Kemungkinan bisa memanfaatkan RPC `get_team_contacts()`/`search_employee_contacts()` yang sudah ada di `dataku2026` — **tapi** `get_team_contacts()` sedang punya bug produksi aktif (`42702: ambiguous column`, menunggu `schema_89b`), jangan disandarkan sampai diperbaiki.
+3. Setup Cron Trigger via Dashboard Supabase — wajib tim Supabase (di luar sandbox), konsisten dengan kategori tugas yang selalu perlu eksekusi manual di proyek ini.
+
+**Konsekuensi sampai job sinkronisasi berjalan:** tabel ini kosong → semua percobaan mencatat pelanggaran dengan `pelapor_sumber='hris'` akan **ditolak database** (FK constraint violation) — disengaja, bukan bug, supaya tidak diam-diam menyimpan ID pegawai yang tidak tervalidasi.
 
 ### `prestasi` (DRAFT→SQL, schema_006, Tahap 7)
 | Kolom | Tipe | Constraint |
@@ -360,7 +381,9 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
     - `pelanggaran` DIREVISI (schema_009, Tahap 10): + tabel referensi `jenis_pelanggaran` (katalog bentuk pelanggaran, kosong — data belum diisi) + kolom pelapor lintas-sistem (`pelapor_sumber`, `pelapor_nama`, `pelapor_hris_employee_id` sebagai referensi LUNAK ke HRIS `dataku2026` — TANPA FK asli karena beda project Supabase).
     - `kesehatan_riwayat` ditambahkan (schema_010, Tahap 11) — rekam medik per-episode (keluhan + penanganan + status), melengkapi `kesehatan` yang tetap jadi profil statis. Nilai `status` masih tebakan, belum dikonfirmasi.
 12. **RESTRICT universal (CONFIRMED 2026-09-02, schema_012, Tahap 13):** instruksi eksplisit pengguna "gunakan RESTRICT" — SEMUA FK ke `santri.id` di semua tabel diubah dari CASCADE menjadi RESTRICT (kecuali `santri_wali`, tabel relasi murni, tetap CASCADE — pilihan saya sendiri, bisa dikoreksi). **Konsekuensi praktis:** santri yang sudah punya data di tabel manapun TIDAK BISA di-hard-delete — satu-satunya cara "menghapus" santri adalah mengubah kolom `status` (`keluar`/`lulus`/`pindah`). Aplikasi tidak boleh punya tombol hard-delete santri.
-13. **Model B poin akumulatif (CONFIRMED 2026-09-02, schema_013, Tahap 14):** instruksi eksplisit pengguna "gunakan model B yang dapat dimodifikasi di setting sistem" — menjawab Assumption #3 lama. Ambang batas poin (kapan status jadi SP1/SP2/SP3) disimpan di tabel `pengaturan_ambang_pelanggaran` yang bisa diubah admin lewat aplikasi, BUKAN hardcode. Status akumulasi dihitung real-time via fungsi + view (`v_akumulasi_poin_santri`), bukan kolom tersimpan. **Tabel ambang batas sengaja kosong** — angka nyata (berapa poin untuk SP1/2/3) belum diisi, sama prinsip dengan `jenis_pelanggaran`.
+13. **Model B poin akumulatif (CONFIRMED 2026-09-02, schema_013, Tahap 14):** instruksi eksplisit pengguna "gunakan model B yang dapat dimodifikasi di setting sistem" — menjawab Assumption #3 lama. Ambang batas poin (kapan status jadi SP1/SP2/SP3) disimpan di tabel `pengaturan_ambang_pelanggaran` yang bisa diubah admin lewat aplikasi, BUKAN hardcode. **Tabel ambang batas sengaja kosong** — angka nyata (berapa poin untuk SP1/2/3) belum diisi, sama prinsip dengan `jenis_pelanggaran`.
+14. **Akumulasi RESET tiap tahun ajaran (CONFIRMED 2026-09-02, schema_016, Tahap 17):** instruksi eksplisit "reset tiap tahun". `pelanggaran` bertambah kolom `tahun_ajaran` (wajib diisi aplikasi). Status disiplin AKTIF santri dihitung via `hitung_akumulasi_poin_santri_tahun(tahun_ajaran)` — HANYA poin di tahun ajaran itu. `v_akumulasi_poin_santri` (all-time) tetap ada untuk laporan riwayat menyeluruh, TAPI TIDAK LAGI dipakai untuk status aktif.
+15. **Sinkronisasi HRIS nyata (CONFIRMED 2026-09-02, schema_014-015, Tahap 15-16):** instruksi eksplisit "sinkron nyata secara berkala". Dibangun tabel replika lokal `pegawai_hris_referensi` di DIS (disinkron berkala dari `dataku2026`) + FK sungguhan dari `pelanggaran.pelapor_hris_employee_id` ke replika itu (menggantikan referensi lunak tanpa validasi di schema_009). **BELUM SELESAI**: job sinkronisasi terjadwal (Edge Function + Cron Trigger) BELUM dibuat — itu kode aplikasi + setup Dashboard Supabase (wajib tim Supabase), bukan migrasi SQL. Selama tabel replika kosong, pelanggaran dengan `pelapor_sumber='hris'` akan DITOLAK database (disengaja, bukan bug).
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -391,16 +414,15 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 
 ## Next Actions
 
-**Status per 2026-09-02: 14 migrasi ditulis (schema_001 s/d schema_013, 18 tabel + 1 view + 2 fungsi).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
+**Status per 2026-09-02: 17 migrasi ditulis (schema_001 s/d schema_016, 19 tabel + 1 view + 3 fungsi).** Belum satupun dijalankan/diuji ke Postgres asli manapun.
 
 1. Konfirmasi/koreksi 6 asumsi lama (santri/wali/kelas — sudah lama tertunda).
 2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — tidak ada trigger status otomatis.
 3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin.
-4. **Isi angka `pengaturan_ambang_pelanggaran`** (schema_013) — berapa poin untuk SP1/SP2/SP3. Model B sudah dikonfirmasi, tapi tabel ambang batas masih kosong.
-5. **Konfirmasi periode akumulasi poin**: all-time (sekarang) atau reset per tahun ajaran/semester? Kalau reset, perlu kolom `tahun_ajaran` tambahan di `pelanggaran` + revisi `v_akumulasi_poin_santri`.
-6. **Putuskan mekanisme integrasi HRIS untuk pelapor** (schema_009) — API call validasi real-time, sinkronisasi berkala daftar pegawai ke DIS, atau tetap snapshot free-text seperti sekarang. Ini keputusan arsitektur (Software Architect), bukan sekadar skema database.
-7. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
-8. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — saya pilih tetap CASCADE karena tabel relasi murni, tapi ini keputusan saya sendiri, bukan instruksi eksplisit.
-9. **Beri tahu tim pengembang aplikasi**: dengan RESTRICT universal, UI TIDAK BOLEH punya tombol hard-delete santri — hanya perubahan status.
-10. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
-11. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga).
+4. **Isi angka `pengaturan_ambang_pelanggaran`** (schema_013) — berapa poin untuk SP1/SP2/SP3.
+5. **Bangun job sinkronisasi HRIS** (schema_014-015) — Edge Function + Cron Trigger (wajib tim Supabase) yang menarik data pegawai dari `dataku2026` secara berkala ke `pegawai_hris_referensi`. **Blocker**: sampai ini jalan, pelaporan pelanggaran oleh pegawai HRIS tidak bisa dicatat di DIS.
+6. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
+7. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — saya pilih tetap CASCADE karena tabel relasi murni, tapi ini keputusan saya sendiri, bukan instruksi eksplisit.
+8. **Beri tahu tim pengembang aplikasi**: dengan RESTRICT universal, UI TIDAK BOLEH punya tombol hard-delete santri — hanya perubahan status. Juga: form catat pelanggaran WAJIB minta `tahun_ajaran`.
+9. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
+10. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth DIS juga).
