@@ -8,12 +8,16 @@
 // ============================================================
 import { login, logout, restoreSession, getCurrentProfile, isLoggedIn } from './auth.js';
 import { listCatatan, tambahCatatan, daftarKategori, labelKategori } from './catatanPerkembangan.js';
+import { listSantri, cariSantriUntukPicker, tambahSantri } from './santri.js';
+
+let santriTerpilih = null; // { id, nama_lengkap, nis } -- state form catatan
 
 const app = document.getElementById('app');
 
 export async function boot() {
   app.addEventListener('click', handleDelegatedClick);
   app.addEventListener('submit', handleDelegatedSubmit);
+  app.addEventListener('input', handleDelegatedInput);
 
   const profile = await restoreSession().catch(() => null);
   if (profile) {
@@ -39,28 +43,70 @@ function renderLogin(errorMsg) {
 }
 
 async function renderDashboard(profile) {
+  const bisaCatat = profile.role === 'ustadz' || profile.role === 'musyrif';
   app.innerHTML = `
     <header class="topbar">
       <span>${escapeHtml(profile.nama_lengkap)} &middot; ${escapeHtml(profile.role)}</span>
       <button data-action="logout">Keluar</button>
     </header>
     <main>
+      ${profile.role === 'admin' ? renderAdminSantri() : ''}
       <h2>Catatan Perkembangan</h2>
-      ${profile.role === 'ustadz' || profile.role === 'musyrif'
-        ? renderFormCatatan()
-        : ''}
+      ${bisaCatat ? renderFormCatatan() : ''}
       <div id="daftar-catatan">Memuat...</div>
     </main>
   `;
   await muatDaftarCatatan();
+  if (profile.role === 'admin') await muatDaftarSantri();
+}
+
+function renderAdminSantri() {
+  return `
+    <section class="admin-santri">
+      <h2>Data Induk Santri</h2>
+      <form data-form="tambah-santri" class="santri-form">
+        <label>NIS<input type="text" name="nis" required></label>
+        <label>Nama Lengkap<input type="text" name="nama_lengkap" required></label>
+        <label>Tanggal Lahir<input type="date" name="tanggal_lahir"></label>
+        <label>Jenis Kelamin
+          <select name="jenis_kelamin">
+            <option value="">-</option>
+            <option value="L">Laki-laki</option>
+            <option value="P">Perempuan</option>
+          </select>
+        </label>
+        <label>Tanggal Masuk<input type="date" name="tanggal_masuk" required></label>
+        <button type="submit">Tambah Santri</button>
+      </form>
+      <div id="daftar-santri">Memuat...</div>
+    </section>
+  `;
+}
+
+async function muatDaftarSantri() {
+  const el = document.getElementById('daftar-santri');
+  if (!el) return;
+  try {
+    const rows = await listSantri();
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada santri terdaftar.</p>'
+      : `<ul class="santri-list">${rows.map(s => `
+          <li>${escapeHtml(s.nama_lengkap)} &middot; NIS ${escapeHtml(s.nis)} &middot; ${escapeHtml(s.status)}</li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
 }
 
 function renderFormCatatan() {
   return `
     <form data-form="catatan" class="catatan-form">
-      <label>ID Santri
-        <input type="text" name="santri_id" placeholder="UUID santri" required>
+      <label>Cari Santri
+        <input type="text" name="santri_search" placeholder="Ketik nama santri..." autocomplete="off">
+        <div id="santri-picker-hasil" class="picker-hasil"></div>
       </label>
+      <input type="hidden" name="santri_id">
+      <p id="santri-terpilih-label" class="hint"></p>
       <label>Kategori
         <select name="kategori">
           ${daftarKategori().map(k => `<option value="${k.value}">${escapeHtml(k.label)}</option>`).join('')}
@@ -70,7 +116,6 @@ function renderFormCatatan() {
         <textarea name="isi" required rows="3" placeholder="Tulis perkembangan santri..."></textarea>
       </label>
       <button type="submit">Simpan</button>
-      <p class="hint">Catatan: form ini belum punya pencarian nama santri (perlu modul Data Induk Santri, belum ada UI). Sementara isi UUID santri langsung.</p>
     </form>
   `;
 }
@@ -101,6 +146,40 @@ async function handleDelegatedClick(e) {
     await logout();
     renderLogin();
   }
+  const pickHasil = e.target.closest('[data-pick-santri]');
+  if (pickHasil) {
+    const form = pickHasil.closest('form');
+    santriTerpilih = {
+      id: pickHasil.dataset.pickSantri,
+      nama_lengkap: pickHasil.dataset.nama,
+      nis: pickHasil.dataset.nis,
+    };
+    form.querySelector('[name="santri_id"]').value = santriTerpilih.id;
+    form.querySelector('[name="santri_search"]').value = santriTerpilih.nama_lengkap;
+    document.getElementById('santri-picker-hasil').innerHTML = '';
+    document.getElementById('santri-terpilih-label').textContent =
+      `Terpilih: ${santriTerpilih.nama_lengkap} (NIS ${santriTerpilih.nis})`;
+  }
+}
+
+let pickerDebounce = null;
+async function handleDelegatedInput(e) {
+  if (e.target.name !== 'santri_search') return;
+  clearTimeout(pickerDebounce);
+  const q = e.target.value;
+  const hasilEl = document.getElementById('santri-picker-hasil');
+  pickerDebounce = setTimeout(async () => {
+    try {
+      const hasil = await cariSantriUntukPicker(q);
+      hasilEl.innerHTML = hasil.length === 0 ? '' : hasil.map(s => `
+        <div class="picker-item" data-pick-santri="${s.id}" data-nama="${escapeHtml(s.nama_lengkap)}" data-nis="${escapeHtml(s.nis)}">
+          ${escapeHtml(s.nama_lengkap)} <small>(NIS ${escapeHtml(s.nis)})</small>
+        </div>
+      `).join('');
+    } catch (err) {
+      hasilEl.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+    }
+  }, 300);
 }
 
 async function handleDelegatedSubmit(e) {
@@ -119,15 +198,38 @@ async function handleDelegatedSubmit(e) {
   }
 
   if (formType === 'catatan') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) {
+      alert('Pilih santri dari hasil pencarian dulu (ketik nama, klik salah satu hasil).'); // eslint-disable-line no-alert
+      return;
+    }
     try {
       await tambahCatatan({
-        santriId: fd.get('santri_id'),
+        santriId,
         kategori: fd.get('kategori'),
         isi: fd.get('isi'),
         dicatatOleh: getCurrentProfile().id,
       });
       e.target.reset();
+      santriTerpilih = null;
+      document.getElementById('santri-terpilih-label').textContent = '';
       await muatDaftarCatatan();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert -- MVP, ganti toast nanti
+    }
+  }
+
+  if (formType === 'tambah-santri') {
+    try {
+      await tambahSantri({
+        nis: fd.get('nis'),
+        namaLengkap: fd.get('nama_lengkap'),
+        tanggalLahir: fd.get('tanggal_lahir'),
+        jenisKelamin: fd.get('jenis_kelamin'),
+        tanggalMasuk: fd.get('tanggal_masuk'),
+      });
+      e.target.reset();
+      await muatDaftarSantri();
     } catch (err) {
       alert(err.message); // eslint-disable-line no-alert -- MVP, ganti toast nanti
     }
