@@ -1,5 +1,14 @@
 # Sinkronisasi Pegawai HRIS → DIS
 
+> **STATUS: DITUNDA (keputusan eksplisit pengguna, 2026-09-02).**
+> Import nama pegawai dari `dataku2026` sengaja tidak dilanjutkan
+> dulu — kode di bawah ini tetap disimpan lengkap supaya siap dipakai
+> kapan pun pekerjaan ini dilanjutkan, TAPI jangan dideploy sampai ada
+> instruksi lanjut. Selama ditunda, `pelanggaran.pelapor_sumber='hris'`
+> tidak bisa dicatat di DIS (FK ke `pegawai_hris_referensi` menolak
+> semua nilai karena tabel itu kosong) — pencatatan pelanggaran untuk
+> sementara hanya lewat `pelapor_sumber='dis'`.
+
 Job ini mengisi tabel `pegawai_hris_referensi` (schema_014) di project
 **DIS** dengan salinan data pegawai dari project **dataku2026** (HRIS),
 supaya `pelanggaran.pelapor_hris_employee_id` (schema_015) bisa punya
