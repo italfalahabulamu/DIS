@@ -19,6 +19,11 @@ import { login, logout, restoreSession, getCurrentProfile, isLoggedIn } from './
 import { listCatatan, tambahCatatan, daftarKategori, labelKategori } from './catatanPerkembangan.js';
 import { listSantri, cariSantriUntukPicker, tambahSantri } from './santri.js';
 import { listKehadiran, catatKehadiran, daftarStatus, labelStatus, listKelas } from './kehadiran.js';
+import { listMataPelajaran, listNilai, inputNilai } from './nilai.js';
+import { listPelanggaran, catatPelanggaran, listJenisPelanggaran, daftarKategoriPelanggaran, labelKategoriPelanggaran,
+         listPrestasi, catatPrestasi, daftarTingkatPrestasi } from './pelanggaran.js';
+import { listPerizinan, ajukanPerizinan, ubahStatusPerizinan, daftarJenisPerizinan, labelJenisPerizinan, labelStatusPerizinan } from './perizinan.js';
+import { markupPickerSantri } from './santriPickerHelper.js';
 
 const app = document.getElementById('app');
 
@@ -53,11 +58,14 @@ function renderLogin(errorMsg) {
 async function renderDashboard(profile) {
   const bisaCatatKehadiran = profile.role === 'ustadz' || profile.role === 'admin';
   const bisaCatat = profile.role === 'ustadz' || profile.role === 'musyrif';
+  const bisaInputNilai = profile.role === 'ustadz' || profile.role === 'admin';
+  const bisaAjukanPerizinan = profile.role === 'wali';
+  const bisaApprovePerizinan = profile.role === 'admin';
 
   let kelasList = [];
-  if (bisaCatatKehadiran) {
-    kelasList = await listKelas().catch(() => []);
-  }
+  let mapelList = [];
+  if (bisaCatatKehadiran) kelasList = await listKelas().catch(() => []);
+  if (bisaInputNilai) mapelList = await listMataPelajaran().catch(() => []);
 
   app.innerHTML = `
     <header class="topbar">
@@ -71,6 +79,19 @@ async function renderDashboard(profile) {
       ${bisaCatatKehadiran ? renderFormKehadiran(kelasList) : ''}
       <div id="daftar-kehadiran">Memuat...</div>
 
+      <h2>Nilai</h2>
+      ${bisaInputNilai ? renderFormNilai(kelasList, mapelList) : ''}
+      <div id="daftar-nilai">Memuat...</div>
+
+      <h2>Pelanggaran &amp; Prestasi</h2>
+      ${bisaCatat || profile.role === 'admin' ? renderFormPelanggaranPrestasi() : ''}
+      <div id="daftar-pelanggaran">Memuat...</div>
+      <div id="daftar-prestasi">Memuat...</div>
+
+      <h2>Perizinan</h2>
+      ${bisaAjukanPerizinan ? renderFormPerizinan() : ''}
+      <div id="daftar-perizinan">Memuat...</div>
+
       <h2>Catatan Perkembangan</h2>
       ${bisaCatat ? renderFormCatatan() : ''}
       <div id="daftar-catatan">Memuat...</div>
@@ -78,6 +99,10 @@ async function renderDashboard(profile) {
   `;
   await muatDaftarCatatan();
   await muatDaftarKehadiran();
+  await muatDaftarNilai();
+  await muatDaftarPelanggaran();
+  await muatDaftarPrestasi();
+  await muatDaftarPerizinan(profile);
   if (profile.role === 'admin') await muatDaftarSantri();
 }
 
@@ -165,6 +190,163 @@ async function muatDaftarKehadiran() {
   }
 }
 
+function renderFormNilai(kelasList, mapelList) {
+  if (kelasList.length === 0 || mapelList.length === 0) {
+    return '<p class="hint">Belum ada kelas/mata pelajaran tersedia untuk Anda.</p>';
+  }
+  return `
+    <form data-form="nilai" class="nilai-form">
+      ${markupPickerSantri()}
+      <label>Kelas
+        <select name="kelas_id" required>
+          ${kelasList.map(k => `<option value="${k.id}">${escapeHtml(k.nama_kelas)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Mata Pelajaran
+        <select name="mata_pelajaran_id" required>
+          ${mapelList.map(m => `<option value="${m.id}">${escapeHtml(m.nama_mapel)} (KKM ${m.kkm})</option>`).join('')}
+        </select>
+      </label>
+      <label>Semester
+        <select name="semester">
+          <option value="ganjil">Ganjil</option>
+          <option value="genap">Genap</option>
+        </select>
+      </label>
+      <label>Tahun Ajaran<input type="text" name="tahun_ajaran" placeholder="2026/2027" required></label>
+      <label>Nilai (0-100)<input type="number" name="nilai_angka" min="0" max="100" step="0.01" required></label>
+      <label>Predikat (opsional)<input type="text" name="predikat"></label>
+      <button type="submit">Simpan Nilai</button>
+    </form>
+  `;
+}
+
+async function muatDaftarNilai() {
+  const el = document.getElementById('daftar-nilai');
+  if (!el) return;
+  try {
+    const rows = await listNilai();
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada data nilai.</p>'
+      : `<ul class="nilai-list">${rows.slice(0, 20).map(r => `
+          <li>${escapeHtml(r.santri?.nama_lengkap || '-')} &middot; ${escapeHtml(r.mata_pelajaran?.nama_mapel || '-')} &middot;
+              <strong>${r.nilai_angka}</strong> ${r.predikat ? `(${escapeHtml(r.predikat)})` : ''}
+              &middot; ${escapeHtml(r.semester)} ${escapeHtml(r.tahun_ajaran)}</li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderFormPelanggaranPrestasi() {
+  return `
+    <form data-form="pelanggaran" class="pelanggaran-form">
+      <h3>Catat Pelanggaran</h3>
+      ${markupPickerSantri()}
+      <label>Tanggal<input type="date" name="tanggal" required value="${new Date().toISOString().slice(0, 10)}"></label>
+      <label>Kategori
+        <select name="kategori">
+          ${daftarKategoriPelanggaran().map(k => `<option value="${k.value}">${escapeHtml(k.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Poin<input type="number" name="poin" min="0" required></label>
+      <label>Deskripsi<textarea name="deskripsi" rows="2"></textarea></label>
+      <button type="submit">Simpan Pelanggaran</button>
+      <p class="hint">Katalog jenis pelanggaran (jenis_pelanggaran) masih kosong -- form ini input manual kategori+poin, belum pakai dropdown katalog.</p>
+    </form>
+    <form data-form="prestasi" class="prestasi-form">
+      <h3>Catat Prestasi</h3>
+      ${markupPickerSantri()}
+      <label>Tanggal<input type="date" name="tanggal" required value="${new Date().toISOString().slice(0, 10)}"></label>
+      <label>Kategori
+        <select name="kategori">
+          <option value="akademik">Akademik</option>
+          <option value="non_akademik">Non-Akademik</option>
+        </select>
+      </label>
+      <label>Tingkat
+        <select name="tingkat">
+          ${daftarTingkatPrestasi().map(t => `<option value="${t.value}">${escapeHtml(t.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Deskripsi<textarea name="deskripsi" rows="2" required></textarea></label>
+      <button type="submit">Simpan Prestasi</button>
+    </form>
+  `;
+}
+
+async function muatDaftarPelanggaran() {
+  const el = document.getElementById('daftar-pelanggaran');
+  if (!el) return;
+  try {
+    const rows = await listPelanggaran();
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada data pelanggaran.</p>'
+      : `<ul class="pelanggaran-list">${rows.slice(0, 10).map(r => `
+          <li>${escapeHtml(r.tanggal)} &middot; ${escapeHtml(r.santri?.nama_lengkap || '-')} &middot;
+              ${escapeHtml(labelKategoriPelanggaran(r.kategori))} (${r.poin} poin)</li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function muatDaftarPrestasi() {
+  const el = document.getElementById('daftar-prestasi');
+  if (!el) return;
+  try {
+    const rows = await listPrestasi();
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada data prestasi.</p>'
+      : `<ul class="prestasi-list">${rows.slice(0, 10).map(r => `
+          <li>${escapeHtml(r.tanggal)} &middot; ${escapeHtml(r.santri?.nama_lengkap || '-')} &middot; ${escapeHtml(r.deskripsi)}</li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderFormPerizinan() {
+  return `
+    <form data-form="perizinan" class="perizinan-form">
+      ${markupPickerSantri({ label: 'Cari Santri (anak Anda)' })}
+      <label>Jenis
+        <select name="jenis">
+          ${daftarJenisPerizinan().map(j => `<option value="${j.value}">${escapeHtml(j.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Tanggal Mulai<input type="date" name="tanggal_mulai" required></label>
+      <label>Tanggal Selesai<input type="date" name="tanggal_selesai" required></label>
+      <label>Alasan<textarea name="alasan" rows="2"></textarea></label>
+      <button type="submit">Ajukan Izin</button>
+    </form>
+  `;
+}
+
+async function muatDaftarPerizinan(profile) {
+  const el = document.getElementById('daftar-perizinan');
+  if (!el) return;
+  try {
+    const rows = await listPerizinan();
+    const bisaApprove = profile.role === 'admin';
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada pengajuan izin.</p>'
+      : `<ul class="perizinan-list">${rows.slice(0, 10).map(r => `
+          <li>
+            ${escapeHtml(r.santri?.nama_lengkap || '-')} &middot; ${escapeHtml(labelJenisPerizinan(r.jenis))}
+            &middot; ${escapeHtml(r.tanggal_mulai)} s.d. ${escapeHtml(r.tanggal_selesai)}
+            &middot; <strong>${escapeHtml(labelStatusPerizinan(r.status))}</strong>
+            ${bisaApprove && r.status === 'menunggu' ? `
+              <button type="button" data-action="setujui-izin" data-izin-id="${r.id}">Setujui</button>
+              <button type="button" data-action="tolak-izin" data-izin-id="${r.id}">Tolak</button>
+            ` : ''}
+          </li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
 function renderFormCatatan() {
   return `
     <form data-form="catatan" class="catatan-form">
@@ -224,6 +406,17 @@ async function handleDelegatedClick(e) {
     label.querySelector('.picker-hasil').innerHTML = '';
     const terpilihEl = form.querySelector('.santri-terpilih-label');
     if (terpilihEl) terpilihEl.textContent = `Terpilih: ${nama} (NIS ${nis})`;
+  }
+
+  const izinBtn = e.target.closest('[data-action="setujui-izin"], [data-action="tolak-izin"]');
+  if (izinBtn) {
+    const status = izinBtn.dataset.action === 'setujui-izin' ? 'disetujui' : 'ditolak';
+    try {
+      await ubahStatusPerizinan(izinBtn.dataset.izinId, status);
+      await muatDaftarPerizinan(getCurrentProfile());
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
   }
 }
 
@@ -305,6 +498,86 @@ async function handleDelegatedSubmit(e) {
       await muatDaftarKehadiran();
     } catch (err) {
       alert(err.message); // eslint-disable-line no-alert -- MVP, ganti toast nanti
+    }
+  }
+
+  if (formType === 'nilai') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu.'); return; } // eslint-disable-line no-alert
+    try {
+      await inputNilai({
+        santriId,
+        kelasId: fd.get('kelas_id'),
+        mataPelajaranId: fd.get('mata_pelajaran_id'),
+        semester: fd.get('semester'),
+        tahunAjaran: fd.get('tahun_ajaran'),
+        nilaiAngka: fd.get('nilai_angka'),
+        predikat: fd.get('predikat'),
+        inputOleh: getCurrentProfile().id,
+      });
+      e.target.reset();
+      const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
+      await muatDaftarNilai();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'pelanggaran') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu.'); return; } // eslint-disable-line no-alert
+    try {
+      await catatPelanggaran({
+        santriId,
+        tanggal: fd.get('tanggal'),
+        kategori: fd.get('kategori'),
+        poin: fd.get('poin'),
+        deskripsi: fd.get('deskripsi'),
+      });
+      e.target.reset();
+      const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
+      await muatDaftarPelanggaran();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'prestasi') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu.'); return; } // eslint-disable-line no-alert
+    try {
+      await catatPrestasi({
+        santriId,
+        tanggal: fd.get('tanggal'),
+        kategori: fd.get('kategori'),
+        deskripsi: fd.get('deskripsi'),
+        tingkat: fd.get('tingkat'),
+      });
+      e.target.reset();
+      const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
+      await muatDaftarPrestasi();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'perizinan') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu.'); return; } // eslint-disable-line no-alert
+    try {
+      await ajukanPerizinan({
+        santriId,
+        jenis: fd.get('jenis'),
+        tanggalMulai: fd.get('tanggal_mulai'),
+        tanggalSelesai: fd.get('tanggal_selesai'),
+        alasan: fd.get('alasan'),
+        diajukanOleh: getCurrentProfile().wali_id,
+      });
+      e.target.reset();
+      const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
+      await muatDaftarPerizinan(getCurrentProfile());
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
     }
   }
 
