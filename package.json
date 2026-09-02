@@ -1,0 +1,25 @@
+{
+  "name": "hris-al-falah",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HRIS Al-Falah — frontend statis (public/) + backend Supabase (supabase/). Tidak ada framework/bundler; package.json ini murni untuk mendefinisikan script build (injeksi kredensial dari env var) dan test (smoke test mockDataService), dipakai oleh Cloudflare Pages dan CI GitHub Actions.",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "vite",
+    "build:vite": "vite build",
+    "test": "vitest run",
+    "test:e2e-self-registration": "node tests/e2e-supabase-self-registration.test.js",
+    "test:e2e-leave-approval": "node tests/e2e-supabase-leave-approval.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.112.2",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.9.0"
+  }
+}
