@@ -273,10 +273,10 @@ Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yan
 
 **Kenapa perlu tabel ini:** DIS dan `dataku2026` tetap dua project Supabase terpisah — Postgres tidak mendukung FK lintas database. Tabel ini adalah **salinan lokal** sebagian data pegawai HRIS, supaya `pelanggaran.pelapor_hris_employee_id` (schema_015) bisa punya FK **sungguhan** ke sini, bukan sekadar teks bebas tanpa validasi seperti sebelumnya (schema_009).
 
-**BELUM SELESAI (di luar cakupan migrasi SQL):**
-1. Job sinkronisasi terjadwal (Supabase Edge Function + Cron Trigger) yang menarik data dari `dataku2026` secara berkala dan meng-upsert ke tabel ini — **belum dibuat**, ini kode aplikasi.
-2. Endpoint di `dataku2026` yang bisa dipanggil job itu — belum ada/dikonfirmasi. Kemungkinan bisa memanfaatkan RPC `get_team_contacts()`/`search_employee_contacts()` yang sudah ada di `dataku2026` — **tapi** `get_team_contacts()` sedang punya bug produksi aktif (`42702: ambiguous column`, menunggu `schema_89b`), jangan disandarkan sampai diperbaiki.
-3. Setup Cron Trigger via Dashboard Supabase — wajib tim Supabase (di luar sandbox), konsisten dengan kategori tugas yang selalu perlu eksekusi manual di proyek ini.
+**BELUM SELESAI (di luar cakupan migrasi SQL) — STATUS TAHAP 18 (kode ditulis, belum dideploy):**
+1. Job sinkronisasi terjadwal — **kode Edge Function sudah ditulis** di `supabase/functions/sync-pegawai-hris/` (Deno/TypeScript), lengkap dengan README setup untuk tim Supabase. **BELUM dideploy, belum diverifikasi** — nama tabel/kolom sumber di `dataku2026` masih **tebakan** (ditandai eksplisit di kode), perlu dicek terhadap skema asli sebelum deploy.
+2. Endpoint di `dataku2026` — job memilih query LANGSUNG ke tabel sumber (bukan lewat RPC `get_team_contacts()`/`search_employee_contacts()` yang sedang bug) via `service_role` key lintas-project. Ini juga berarti kredensial dengan akses penuh ke database HRIS dipegang oleh project DIS — dicatat sebagai risiko keamanan yang perlu dipertimbangkan (lihat README).
+3. Setup Cron Trigger via Dashboard Supabase — instruksi lengkap ada di README, wajib tim Supabase.
 
 **Konsekuensi sampai job sinkronisasi berjalan:** tabel ini kosong → semua percobaan mencatat pelanggaran dengan `pelapor_sumber='hris'` akan **ditolak database** (FK constraint violation) — disengaja, bukan bug, supaya tidak diam-diam menyimpan ID pegawai yang tidak tervalidasi.
 
@@ -420,7 +420,7 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — tidak ada trigger status otomatis.
 3. **Isi data `jenis_pelanggaran`** (schema_009) — daftar bentuk pelanggaran nyata pesantren beserta gradasi & poin.
 4. **Isi angka `pengaturan_ambang_pelanggaran`** (schema_013) — berapa poin untuk SP1/SP2/SP3.
-5. **Bangun job sinkronisasi HRIS** (schema_014-015) — Edge Function + Cron Trigger (wajib tim Supabase) yang menarik data pegawai dari `dataku2026` secara berkala ke `pegawai_hris_referensi`. **Blocker**: sampai ini jalan, pelaporan pelanggaran oleh pegawai HRIS tidak bisa dicatat di DIS.
+5. **Deploy job sinkronisasi HRIS** (kode sudah ada di `supabase/functions/sync-pegawai-hris/`, Tahap 18) — verifikasi nama tabel/kolom sumber di `dataku2026` (masih tebakan), lalu deploy + setup Cron Trigger sesuai README. **Blocker**: sampai ini jalan, pelaporan pelanggaran oleh pegawai HRIS tidak bisa dicatat di DIS.
 6. **Konfirmasi/koreksi nilai `status`** di `kesehatan_riwayat` (schema_010) — masih tebakan dari alur umum UKS, belum diverifikasi.
 7. **Konfirmasi pengecualian `santri_wali`** dari kebijakan RESTRICT universal (schema_012) — saya pilih tetap CASCADE karena tabel relasi murni, tapi ini keputusan saya sendiri, bukan instruksi eksplisit.
 8. **Beri tahu tim pengembang aplikasi**: dengan RESTRICT universal, UI TIDAK BOLEH punya tombol hard-delete santri — hanya perubahan status. Juga: form catat pelanggaran WAJIB minta `tahun_ajaran`.
