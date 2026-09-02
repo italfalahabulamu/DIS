@@ -35,10 +35,10 @@ punya akun login terpisah di v0.1 (lihat Assumptions #1).
 8. `kehadiran` — presensi harian santri
 9. `spp_tagihan` — tagihan SPP per santri per periode (DRAFT→SQL, schema_005, Tahap 6 — 2 keputusan belum dikonfirmasi, lihat catatan di bawah)
 10. `spp_pembayaran` — pembayaran atas tagihan (DRAFT→SQL, schema_005, Tahap 6)
-11. `pelanggaran` — catatan pelanggaran (gradasi poin)
-12. `prestasi` — catatan prestasi (akademik/non-akademik)
-13. `perizinan` — pengajuan izin/cuti santri
-14. `kesehatan` — riwayat kesehatan santri (data sensitif)
+11. `pelanggaran` — catatan pelanggaran (gradasi poin) (DRAFT→SQL, schema_006, Tahap 7 — Assumption #3 belum dikonfirmasi)
+12. `prestasi` — catatan prestasi (akademik/non-akademik) (DRAFT→SQL, schema_006, Tahap 7)
+13. `perizinan` — pengajuan izin/cuti santri (DRAFT→SQL, schema_007, Tahap 8 — keputusan ON DELETE belum final)
+14. `kesehatan` — riwayat kesehatan santri, data sensitif (DRAFT→SQL, schema_008, Tahap 9 — hanya snapshot terkini, tanpa riwayat perubahan)
 
 ## Entity-Relationship Diagram
 
@@ -207,51 +207,63 @@ Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 
 Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yang dilakukan hanya pengecekan sintaks kasar (keseimbangan tanda kurung), bukan eksekusi nyata.
 
-### `pelanggaran` (lihat Assumptions #5)
+### `pelanggaran` (DRAFT→SQL, schema_006, Tahap 7 — lihat Assumptions #3, BELUM dikonfirmasi)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
-| santri_id | uuid | FK -> santri.id |
+| santri_id | uuid | FK -> santri.id, ON DELETE CASCADE |
 | tanggal | date | NOT NULL |
 | kategori | text | CHECK IN ('teguran_lisan','teguran_tertulis','sp1','sp2','sp3') |
-| poin | integer | NOT NULL |
+| poin | integer | NOT NULL, CHECK >= 0, tanpa validasi rentang per kategori |
 | deskripsi | text | |
-| dicatat_oleh | uuid | FK -> users.id |
+| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan |
 
-### `prestasi`
+**Belum dikonfirmasi:** gradasi tetap 5 kategori ini langsung ditulis dari Assumption #3 (belum pernah dikonfirmasi eksplisit). Tidak ada trigger yang menghitung kenaikan SP1→SP2→SP3 otomatis dari akumulasi poin — kalau DIS butuh itu, perlu keputusan bisnis + migrasi tambahan.
+
+### `prestasi` (DRAFT→SQL, schema_006, Tahap 7)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
-| santri_id | uuid | FK -> santri.id |
+| santri_id | uuid | FK -> santri.id, ON DELETE CASCADE |
 | tanggal | date | NOT NULL |
 | kategori | text | CHECK IN ('akademik','non_akademik') |
 | deskripsi | text | NOT NULL |
-| tingkat | text | nullable, mis. 'sekolah','kabupaten','provinsi','nasional' |
-| dicatat_oleh | uuid | FK -> users.id |
+| tingkat | text | nullable, CHECK IN ('sekolah','kabupaten','provinsi','nasional') |
+| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan |
 
-### `perizinan`
+**Belum dipetakan:** temuan "Lulus KEMMAS" (hafalan Qur'an/tahfizh) dari `blanko_ijazah.xlsm` (lihat bagian "Temuan tambahan" di bawah) — kemungkinan sub-kategori prestasi yang belum masuk skema ini.
+
+### `perizinan` (DRAFT→SQL, schema_007, Tahap 8 — keputusan ON DELETE belum final)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
-| santri_id | uuid | FK -> santri.id |
-| diajukan_oleh | uuid | FK -> wali.id |
+| santri_id | uuid | FK -> santri.id, ON DELETE CASCADE |
+| diajukan_oleh | uuid | FK -> wali.id, NOT NULL, ON DELETE CASCADE |
 | jenis | text | CHECK IN ('pulang','sakit','keperluan_lain') |
 | tanggal_mulai | date | NOT NULL |
-| tanggal_selesai | date | NOT NULL |
+| tanggal_selesai | date | NOT NULL, CHECK >= tanggal_mulai |
 | alasan | text | |
 | status | text | CHECK IN ('menunggu','disetujui','ditolak'), default 'menunggu' |
-| disetujui_oleh | uuid | FK -> users.id, nullable |
+| disetujui_oleh | uuid | FK -> users.id, nullable, BELUM diaktifkan |
 
-### `kesehatan` (lihat Assumptions #6 — data sensitif)
+**`diajukan_oleh` NOT NULL** — konsekuensi dari keputusan CONFIRMED #4 (wali optional per santri): santri tanpa wali tidak bisa punya proses perizinan. Ini disengaja, bukan bug.
+
+**Belum final:** `diajukan_oleh` pakai `ON DELETE CASCADE` mengikuti pola `wali_id` di `santri_wali` (schema_001) — TAPI ini punya trade-off yang sama persis dengan alasan `ON DELETE RESTRICT` dipilih untuk `spp_pembayaran.tagihan_id` (schema_005): kehilangan riwayat/jejak kalau parent row dihapus. Dua kasus ini belum diputuskan secara konsisten dan perlu direview bersama.
+
+### `kesehatan` (DRAFT→SQL, schema_008, Tahap 9 — data sensitif, lihat Assumptions #6)
 | Kolom | Tipe | Constraint |
 |---|---|---|
-| santri_id | uuid | PK, FK -> santri.id |
+| santri_id | uuid | PK, FK -> santri.id, ON DELETE CASCADE |
 | golongan_darah | text | nullable |
 | alergi | text | nullable |
 | riwayat_penyakit | text | nullable |
 | kontak_darurat | text | nullable |
-| updated_at | timestamptz | default now() |
-| updated_oleh | uuid | FK -> users.id |
+| updated_at | timestamptz | default now(), auto-update via trigger |
+| updated_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+
+**Akses dibatasi admin + wali santri bersangkutan SAJA** (ustadz TIDAK otomatis punya akses) — CONFIRMED 2026-09-02, keputusan #2.
+
+**Gap yang belum dikonfirmasi:** tabel ini hanya menyimpan kondisi TERKINI (1 baris per santri, `updated_at` menimpa nilai lama) — TIDAK ada riwayat perubahan dari waktu ke waktu. Draft manapun tidak menyebutkan kebutuhan riwayat, jadi ini bukan bug, tapi kemungkinan gap yang perlu dikonfirmasi sebelum dianggap final.
 
 ## Indexing Strategy
 
@@ -287,6 +299,8 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 6. **Santri perlu riwayat pindah kelas** (bukan satu kelas tetap per tahun ajaran) — CONFIRMED. Kolom `santri.kelas_id` dari `schema_001` **dihapus** di `schema_002`, digantikan tabel `santri_kelas_riwayat`. `kelas` + `santri_kelas_riwayat` + `kehadiran` — **FINAL untuk v1.0**, ditulis di `schema_002`.
 7. **Nilai saat santri pindah kelas tengah semester**: dicatat di kelas TERBARU santri, bukan dipecah per kelas — CONFIRMED. `nilai` — **FINAL untuk v1.0**, ditulis di `schema_004`.
 8. **SPP dicatat manual** (keputusan #3 di atas) — `spp_tagihan` + `spp_pembayaran` ditulis SQL di `schema_005` (Tahap 6), TAPI **belum sepenuhnya FINAL**: dua pilihan desain (ON DELETE RESTRICT di `tagihan_id`, dan tidak adanya perhitungan status otomatis) adalah keputusan saya sendiri saat menulis migrasi, bukan hasil konfirmasi eksplisit — perlu direview sebelum dianggap selesai seperti modul lain.
+9. **Kesehatan dibatasi admin + wali santri bersangkutan** (keputusan #2 di atas) — `kesehatan` ditulis SQL di `schema_008` (Tahap 9), akses ustadz sengaja dikecualikan sesuai konfirmasi. TAPI struktur "hanya snapshot terkini tanpa riwayat" adalah pembacaan saya atas draft, belum dikonfirmasi eksplisit.
+10. **`pelanggaran`, `prestasi`, `perizinan` ditulis SQL** di `schema_006`/`schema_007` (Tahap 7-8) — status DRAFT→SQL, bukan FINAL. `pelanggaran` masih pakai Assumption #3 yang belum dikonfirmasi; `perizinan.diajukan_oleh` punya keputusan ON DELETE yang belum konsisten dengan pola RESTRICT di SPP (lihat catatan di bagian schema masing-masing).
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -317,8 +331,12 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 
 ## Next Actions
 
-1. Konfirmasi/koreksi 6 asumsi di atas.
-2. **Baru**: konfirmasi/koreksi 2 keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005, lihat catatan di bagian schema masing-masing) — `ON DELETE RESTRICT` di `tagihan_id`, dan tidak adanya trigger status otomatis.
-3. Lanjut modul berikutnya sesuai urutan entity list yang belum digarap: **Pelanggaran & Prestasi**, lalu **Perizinan**, lalu **Kesehatan** (Tahap 7-9).
-4. Kalau sudah, lanjut ke `api-engineer` untuk kontrak API per modul.
-5. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu semua modul SQL tahap-per-tahap selesai + tabel `users`+auth).
+**Status per 2026-09-02: SEMUA 9 modul entity list sudah ditulis SQL** (schema_001 s/d schema_008, mencakup 14 tabel). TAPI "sudah ditulis SQL" ≠ "final/siap produksi" — lihat rincian di bawah. Belum satupun migrasi dijalankan/diuji ke Postgres asli manapun.
+
+1. Konfirmasi/koreksi 6 asumsi lama di atas (santri/wali/kelas — sudah lama tertunda).
+2. Konfirmasi/koreksi keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005) — `ON DELETE RESTRICT` di `tagihan_id`, tidak ada trigger status otomatis.
+3. Konfirmasi Assumption #3 (`pelanggaran`, schema_006) — apakah gradasi 5-tingkat tetap sudah benar, atau DIS butuh sistem poin akumulatif berbeda.
+4. **Putuskan satu kebijakan ON DELETE yang konsisten** untuk FK ke entitas induk (santri/wali) di seluruh tabel riwayat/transaksional — saat ini `spp_pembayaran.tagihan_id` pakai RESTRICT sementara `perizinan.diajukan_oleh` pakai CASCADE, dengan alasan trade-off yang sama persis (kehilangan jejak riwayat). Ini butuh satu keputusan eksplisit, bukan dibiarkan berbeda per modul karena "keputusan siapa yang menulis migrasinya".
+5. Konfirmasi apakah `kesehatan` (schema_008) memang cukup snapshot terkini, atau butuh riwayat perubahan.
+6. Setelah semua di atas dikonfirmasi/direvisi: lanjut ke `api-engineer` untuk kontrak API per modul.
+7. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu tabel `users`+auth juga).
