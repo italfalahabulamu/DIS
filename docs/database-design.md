@@ -33,8 +33,8 @@ punya akun login terpisah di v0.1 (lihat Assumptions #1).
 6. `mata_pelajaran` — daftar mapel (FINAL, diambil dari blanko_ijazah.xlsm sheet "Leger 2026")
 7. `nilai` — nilai santri per mapel per semester (FINAL, schema_004)
 8. `kehadiran` — presensi harian santri
-9. `spp_tagihan` — tagihan SPP per santri per periode
-10. `spp_pembayaran` — pembayaran atas tagihan
+9. `spp_tagihan` — tagihan SPP per santri per periode (DRAFT→SQL, schema_005, Tahap 6 — 2 keputusan belum dikonfirmasi, lihat catatan di bawah)
+10. `spp_pembayaran` — pembayaran atas tagihan (DRAFT→SQL, schema_005, Tahap 6)
 11. `pelanggaran` — catatan pelanggaran (gradasi poin)
 12. `prestasi` — catatan prestasi (akademik/non-akademik)
 13. `perizinan` — pengajuan izin/cuti santri
@@ -180,7 +180,7 @@ Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 | dicatat_oleh | uuid | FK -> users.id, belum diaktifkan |
 | UNIQUE | | (santri_id, tanggal) |
 
-### `spp_tagihan` (lihat Assumptions #4)
+### `spp_tagihan` (DRAFT → ditulis SQL di schema_005, Tahap 6 — lihat catatan di bawah, BELUM sepenuhnya FINAL)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
@@ -191,15 +191,21 @@ Detail lengkap per baris (SQL seed) ada di `supabase/migrations/`.
 | jatuh_tempo | date | |
 | status | text | CHECK IN ('belum_bayar','lunas','sebagian'), default 'belum_bayar' |
 
-### `spp_pembayaran`
+### `spp_pembayaran` (DRAFT → ditulis SQL di schema_005, Tahap 6)
 | Kolom | Tipe | Constraint |
 |---|---|---|
 | id | uuid | PK |
-| tagihan_id | uuid | FK -> spp_tagihan.id |
-| jumlah_dibayar | numeric(12,2) | NOT NULL |
+| tagihan_id | uuid | FK -> spp_tagihan.id, **ON DELETE RESTRICT** (bukan CASCADE — lihat catatan di bawah) |
+| jumlah_dibayar | numeric(12,2) | NOT NULL, CHECK > 0 |
 | tanggal_bayar | timestamptz | default now() |
 | metode | text | CHECK IN ('tunai','transfer','lainnya') |
-| dicatat_oleh | uuid | FK -> users.id (role keuangan_spp) |
+| dicatat_oleh | uuid | FK -> users.id, BELUM diaktifkan |
+
+**Dua keputusan di schema_005 yang BELUM dikonfirmasi pengguna (ditulis eksplisit, jangan dianggap FINAL):**
+1. `tagihan_id` pakai `ON DELETE RESTRICT`, bukan `CASCADE` seperti pola FK `santri_id` di tabel lain (`nilai`, `kehadiran`, `santri_wali`) — pilihan saya sendiri supaya tagihan yang sudah punya riwayat pembayaran tidak bisa terhapus diam-diam (jejak audit keuangan). Ini penyimpangan dari konsistensi pola CASCADE yang sudah ada, perlu direview dan dikonfirmasi.
+2. `spp_tagihan.status` ('belum_bayar'/'lunas'/'sebagian') **tidak dihitung otomatis** dari total `spp_pembayaran` — tidak ada trigger. Aturan ambang batas (mis. toleransi pembulatan, pembayaran lebih besar dari tagihan) belum didefinisikan di draft manapun.
+
+Migrasi ini **belum dijalankan/diuji ke Postgres asli manapun** — validasi yang dilakukan hanya pengecekan sintaks kasar (keseimbangan tanda kurung), bukan eksekusi nyata.
 
 ### `pelanggaran` (lihat Assumptions #5)
 | Kolom | Tipe | Constraint |
@@ -280,6 +286,7 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 5. `santri` + `wali` + `santri_wali` — **FINAL untuk v1.0**, ditulis di `schema_001`.
 6. **Santri perlu riwayat pindah kelas** (bukan satu kelas tetap per tahun ajaran) — CONFIRMED. Kolom `santri.kelas_id` dari `schema_001` **dihapus** di `schema_002`, digantikan tabel `santri_kelas_riwayat`. `kelas` + `santri_kelas_riwayat` + `kehadiran` — **FINAL untuk v1.0**, ditulis di `schema_002`.
 7. **Nilai saat santri pindah kelas tengah semester**: dicatat di kelas TERBARU santri, bukan dipecah per kelas — CONFIRMED. `nilai` — **FINAL untuk v1.0**, ditulis di `schema_004`.
+8. **SPP dicatat manual** (keputusan #3 di atas) — `spp_tagihan` + `spp_pembayaran` ditulis SQL di `schema_005` (Tahap 6), TAPI **belum sepenuhnya FINAL**: dua pilihan desain (ON DELETE RESTRICT di `tagihan_id`, dan tidak adanya perhitungan status otomatis) adalah keputusan saya sendiri saat menulis migrasi, bukan hasil konfirmasi eksplisit — perlu direview sebelum dianggap selesai seperti modul lain.
 
 ## Assumptions tersisa (belum dikonfirmasi — masih tebakan, perlu direview per modul saat digarap)
 
@@ -311,5 +318,7 @@ sudah diketahui dan harus dihindari sejak migrasi pertama.
 ## Next Actions
 
 1. Konfirmasi/koreksi 6 asumsi di atas.
-2. Kalau sudah, lanjut ke `api-engineer` untuk kontrak API per modul.
-3. Baru setelah itu migrasi SQL nyata ditulis (`supabase/migrations/`) dan skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi.
+2. **Baru**: konfirmasi/koreksi 2 keputusan belum-final di `spp_tagihan`/`spp_pembayaran` (schema_005, lihat catatan di bagian schema masing-masing) — `ON DELETE RESTRICT` di `tagihan_id`, dan tidak adanya trigger status otomatis.
+3. Lanjut modul berikutnya sesuai urutan entity list yang belum digarap: **Pelanggaran & Prestasi**, lalu **Perizinan**, lalu **Kesehatan** (Tahap 7-9).
+4. Kalau sudah, lanjut ke `api-engineer` untuk kontrak API per modul.
+5. Baru setelah itu skeleton `main.js`/`ui-shell.js`/`auth.js` di `patterns/` bisa mulai direfaktor jadi modul DIS yang benar-benar berfungsi (menunggu semua modul SQL tahap-per-tahap selesai + tabel `users`+auth).
