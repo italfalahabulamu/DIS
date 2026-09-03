@@ -7,8 +7,16 @@ dokumen ini bertentangan dengan README atau catatan lain, **dokumen
 ini yang menang** — pola sama seperti `PENDING_ACTIONS.md` di
 dataku2026.
 
-Status per 2026-09-02. Update tanggal + centang setiap kali satu item
+Status per 2026-09-04. Update tanggal + centang setiap kali satu item
 selesai.
+
+**Update sejak 2026-09-02:** UI SPP dan Kesehatan sudah disambung ke
+dashboard (lihat commit `c9c2fe4`) — modul ini kini punya status yang
+sama seperti 5 modul lain: kode lengkap, **belum diuji ke Postgres
+asli**. Checklist smoke test manual lengkap sekarang ada di
+`docs/SMOKE_TEST_CHECKLIST.md` — jalankan setelah blocker di bawah
+selesai, jangan anggap modul mana pun "siap pakai" sebelum semua baris
+di checklist itu tercentang.
 
 ---
 
@@ -25,7 +33,7 @@ sama, populasi akun/auth harus berbeda (sudah ditegaskan eksplisit di
 - [ ] Catat **Project URL** dan **anon public key** (Settings → API) — dibutuhkan di langkah 3
 - [ ] Aktifkan extension `btree_gist` kalau belum default (dipakai `santri_kelas_riwayat` dan `santri_asrama_riwayat` untuk exclude constraint anti-tumpang-tindih periode) — biasanya sudah tersedia, tapi migrasi `schema_021` memanggil `create extension if not exists btree_gist;` sendiri jadi ini seharusnya otomatis.
 
-### 2. Jalankan 21 migrasi SQL
+### 2. Jalankan 23 migrasi SQL
 
 Folder `supabase/migrations/` sudah berurutan secara kronologis
 (nama file diawali timestamp) — jalankan **berurutan**, jangan
@@ -33,10 +41,10 @@ diacak.
 
 - [ ] `supabase db push` (kalau pakai Supabase CLI, direkomendasikan — otomatis urut)
 - [ ] **Atau** manual lewat SQL Editor Dashboard, file demi file sesuai urutan nama
-- [ ] Verifikasi 21 file berhasil jalan tanpa error (`schema_001` s.d. `schema_021`)
+- [ ] Verifikasi 23 file berhasil jalan tanpa error (`schema_001` s.d. `schema_023`)
 
 **Catatan tervalidasi terhadap Postgres asli — TIDAK ADA.** Seluruh
-21 migrasi ini logically masuk akal secara SQL tapi **belum pernah
+23 migrasi ini logically masuk akal secara SQL tapi **belum pernah
 dijalankan ke Postgres sungguhan**. Kalau ada error urutan dependency
 (FK ke tabel yang belum ada, dst), laporkan balik — itu bug di migrasi
 yang perlu diperbaiki, bukan sesuatu yang aman dilewati/diubah manual
@@ -58,12 +66,15 @@ Setelah project ada dan migrasi jalan:
 **Ini prioritas tertinggi begitu blocker selesai.** RLS proyek ini
 (DIS maupun dataku2026) **tidak pernah** diuji terhadap Postgres
 sungguhan — risiko yang sudah berulang tercatat sebagai gap proyek.
-Minimal, uji manual dengan akun test per role:
+
+Checklist langkah-demi-langkah lengkap (semua 7 modul, termasuk kasus
+"harus ditolak" bukan cuma "harus berhasil") sekarang ada di
+**`docs/SMOKE_TEST_CHECKLIST.md`** — pakai itu, bukan ringkasan di
+bawah ini:
 
 - [ ] Buat 1 akun test per role (`admin`, `ustadz`, `musyrif`, `wali`, `keuangan_spp`) via Supabase Auth
 - [ ] Isi 1 baris `penugasan_ustadz` dan 1 baris `penugasan_musyrif` untuk akun test
-- [ ] Verifikasi: ustadz test **hanya** bisa lihat/tulis `nilai`/`kehadiran`/`catatan_perkembangan` untuk santri di kelas yang ditugaskan — **coba juga santri DI LUAR kelasnya, pastikan ditolak** (bukan cuma tes jalur "berhasil")
-- [ ] Verifikasi serupa untuk musyrif (sumbu asrama) dan wali (sumbu santri miliknya)
+- [ ] Jalankan seluruh baris di `docs/SMOKE_TEST_CHECKLIST.md`, termasuk bagian SPP dan Kesehatan yang UI-nya baru disambung
 - [ ] Laporkan hasil balik ke Claude — kalau ada RLS yang bocor/salah, itu perlu migrasi perbaikan, bukan ditambal di aplikasi
 
 ### 5. Buat akun DIS pertama (admin)
@@ -80,6 +91,9 @@ tidak muncul otomatis).
 
 ## 📋 Referensi
 
-- Keputusan bisnis & KPI: `DIS-business-requirement-brief-v0.2.md` (dibagikan terpisah, belum di-commit ke repo — pertimbangkan pindahkan ke `docs/` kalau ingin jadi bagian repo)
+- **Mulai dari sini kalau baru pindah sesi kerja:** `README.md` di root repo
+- Requirement produk (rekonstruksi, perlu koreksi bisnis): `docs/PRD-DIS-v1.0.md`
+- Checklist smoke test manual lengkap: `docs/SMOKE_TEST_CHECKLIST.md`
+- Keputusan bisnis & KPI asli: `DIS-business-requirement-brief-v0.2.md` (dibagikan terpisah, belum di-commit ke repo — pertimbangkan pindahkan ke `docs/` kalau ingin jadi bagian repo)
 - Kode migrasi terurut: `supabase/migrations/`
 - Gap frontend yang masih terbuka: lihat commit message `MVP skeleton: auth + Catatan Perkembangan` di `main`
