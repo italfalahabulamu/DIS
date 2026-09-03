@@ -1,9 +1,20 @@
 // ============================================================
 // uiShell.js -- render shell: login, dashboard per role.
 // Modul MVP yang sudah tersambung: Data Induk Santri (admin),
-// Catatan Perkembangan (ustadz/musyrif tulis, semua role login baca
-// sesuai RLS). Kehadiran menyusul di bawah. Nilai/SPP/Pelanggaran/
-// Perizinan/Kesehatan (Rilis 2) belum punya UI.
+// Catatan Perkembangan, Kehadiran, Nilai, Pelanggaran/Prestasi,
+// Perizinan, SPP, Kesehatan.
+//
+// SPP: status spp_tagihan TIDAK dihitung ulang otomatis dari total
+// pembayaran (gap diwarisi dari schema_005, lihat spp.js) -- UI ini
+// menampilkan tombol update status manual untuk admin/keuangan_spp.
+// TODO(DIS): 2 keputusan bisnis SPP yang disebut di
+// docs/database-design.md (catatan schema_005) BELUM dikonfirmasi --
+// form ini dibangun di atas skema apa adanya, bukan di atas keputusan
+// final. Cek ulang sebelum dipakai pengguna nyata.
+//
+// Kesehatan: akses CONFIRMED admin + wali santri ybs saja (lihat
+// komentar di kesehatan.js) -- ustadz/musyrif sengaja tidak diberi
+// form di sini.
 //
 // KNOWN LIMITATION: role tanpa akses SELECT ke suatu tabel (mis.
 // keuangan_spp ke catatan_perkembangan) akan melihat pesan "belum
@@ -23,6 +34,8 @@ import { listMataPelajaran, listNilai, inputNilai } from './nilai.js';
 import { listPelanggaran, catatPelanggaran, listJenisPelanggaran, daftarKategoriPelanggaran, labelKategoriPelanggaran,
          listPrestasi, catatPrestasi, daftarTingkatPrestasi } from './pelanggaran.js';
 import { listPerizinan, ajukanPerizinan, ubahStatusPerizinan, daftarJenisPerizinan, labelJenisPerizinan, labelStatusPerizinan } from './perizinan.js';
+import { listTagihan, buatTagihan, listPembayaran, catatPembayaran, updateStatusTagihan, daftarJenis as daftarJenisSpp, daftarStatus as daftarStatusSpp, labelJenis as labelJenisSpp, labelStatus as labelStatusSpp } from './spp.js';
+import { getProfilKesehatan, simpanProfilKesehatan, listRiwayatKesehatan, tambahRiwayatKesehatan, daftarStatusRiwayat, labelStatusRiwayat } from './kesehatan.js';
 import { markupPickerSantri } from './santriPickerHelper.js';
 
 const app = document.getElementById('app');
@@ -31,6 +44,7 @@ export async function boot() {
   app.addEventListener('click', handleDelegatedClick);
   app.addEventListener('submit', handleDelegatedSubmit);
   app.addEventListener('input', handleDelegatedInput);
+  app.addEventListener('change', handleDelegatedChange);
 
   const profile = await restoreSession().catch(() => null);
   if (profile) {
@@ -61,6 +75,10 @@ async function renderDashboard(profile) {
   const bisaInputNilai = profile.role === 'ustadz' || profile.role === 'admin';
   const bisaAjukanPerizinan = profile.role === 'wali';
   const bisaApprovePerizinan = profile.role === 'admin';
+  const bisaKelolaSpp = profile.role === 'admin' || profile.role === 'keuangan_spp';
+  // Kesehatan: CONFIRMED admin + wali saja (lihat kesehatan.js) --
+  // ustadz/musyrif TIDAK dapat form ini, sengaja.
+  const bisaKelolaKesehatan = profile.role === 'admin' || profile.role === 'wali';
 
   let kelasList = [];
   let mapelList = [];
@@ -95,6 +113,17 @@ async function renderDashboard(profile) {
       <h2>Catatan Perkembangan</h2>
       ${bisaCatat ? renderFormCatatan() : ''}
       <div id="daftar-catatan">Memuat...</div>
+
+      <h2>SPP</h2>
+      ${bisaKelolaSpp ? renderFormSpp() : ''}
+      <div id="daftar-spp">Memuat...</div>
+
+      ${bisaKelolaKesehatan ? `
+        <h2>Kesehatan</h2>
+        ${renderFormKesehatan(profile)}
+        <div id="profil-kesehatan"></div>
+        <div id="daftar-riwayat-kesehatan"></div>
+      ` : ''}
     </main>
   `;
   await muatDaftarCatatan();
@@ -103,6 +132,7 @@ async function renderDashboard(profile) {
   await muatDaftarPelanggaran();
   await muatDaftarPrestasi();
   await muatDaftarPerizinan(profile);
+  if (bisaKelolaSpp || profile.role === 'wali') await muatDaftarSpp();
   if (profile.role === 'admin') await muatDaftarSantri();
 }
 
@@ -347,6 +377,119 @@ async function muatDaftarPerizinan(profile) {
   }
 }
 
+function renderFormSpp() {
+  return `
+    <form data-form="spp-tagihan" class="spp-form">
+      <h3>Buat Tagihan</h3>
+      ${markupPickerSantri()}
+      <label>Periode<input type="text" name="periode" placeholder="2026-09" required></label>
+      <label>Jenis
+        <select name="jenis">
+          ${daftarJenisSpp().map(j => `<option value="${j.value}">${escapeHtml(j.label)}</option>`).join('')}
+        </select>
+      </label>
+      <label>Jumlah (Rp)<input type="number" name="jumlah" min="0" step="1000" required></label>
+      <label>Jatuh Tempo (opsional)<input type="date" name="jatuh_tempo"></label>
+      <button type="submit">Buat Tagihan</button>
+    </form>
+    <form data-form="spp-pembayaran" class="spp-pembayaran-form">
+      <h3>Catat Pembayaran</h3>
+      <label>ID Tagihan<input type="text" name="tagihan_id" required placeholder="salin dari daftar tagihan di bawah"></label>
+      <label>Jumlah Dibayar (Rp)<input type="number" name="jumlah_dibayar" min="0" step="1000" required></label>
+      <label>Metode
+        <select name="metode">
+          <option value="tunai">Tunai</option>
+          <option value="transfer">Transfer</option>
+          <option value="lainnya">Lainnya</option>
+        </select>
+      </label>
+      <button type="submit">Catat Pembayaran</button>
+      <p class="hint">MVP: pilih tagihan lewat ID (belum ada picker tagihan). Status tagihan TIDAK dihitung ulang otomatis setelah pembayaran -- update status manual di bawah kalau perlu.</p>
+    </form>
+  `;
+}
+
+async function muatDaftarSpp() {
+  const el = document.getElementById('daftar-spp');
+  if (!el) return;
+  const profile = getCurrentProfile();
+  const bisaUbahStatus = profile.role === 'admin' || profile.role === 'keuangan_spp';
+  try {
+    const rows = await listTagihan();
+    el.innerHTML = rows.length === 0
+      ? '<p>Belum ada tagihan SPP.</p>'
+      : `<ul class="spp-list">${rows.slice(0, 20).map(r => `
+          <li>
+            <code>${escapeHtml(r.id)}</code> &middot;
+            ${escapeHtml(r.santri?.nama_lengkap || '-')} &middot; ${escapeHtml(r.periode)} &middot;
+            ${escapeHtml(labelJenisSpp(r.jenis))} &middot; Rp${Number(r.jumlah).toLocaleString('id-ID')}
+            &middot; <strong>${escapeHtml(labelStatusSpp(r.status))}</strong>
+            ${bisaUbahStatus ? `
+              <select data-action="ubah-status-tagihan" data-tagihan-id="${r.id}">
+                ${daftarStatusSpp().map(s => `<option value="${s.value}" ${s.value === r.status ? 'selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
+              </select>
+            ` : ''}
+          </li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    el.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderFormKesehatan(profile) {
+  return `
+    <form data-form="kesehatan-cari" class="kesehatan-cari-form">
+      ${markupPickerSantri({ label: profile.role === 'wali' ? 'Cari Santri (anak Anda)' : 'Cari Santri' })}
+      <button type="submit">Muat Profil Kesehatan</button>
+      <p class="hint">${profile.role === 'wali' ? 'Anda hanya bisa UPDATE profil yang sudah dibuat admin, tidak bisa buat baris baru.' : 'Sebagai admin, Anda bisa membuat profil baru untuk santri yang belum punya.'}</p>
+    </form>
+  `;
+}
+
+let santriKesehatanAktif = null;
+
+async function muatProfilKesehatan(santriId) {
+  santriKesehatanAktif = santriId;
+  const profilEl = document.getElementById('profil-kesehatan');
+  const riwayatEl = document.getElementById('daftar-riwayat-kesehatan');
+  if (!profilEl || !riwayatEl) return;
+  try {
+    const profil = await getProfilKesehatan(santriId);
+    profilEl.innerHTML = `
+      <form data-form="kesehatan-profil" class="kesehatan-profil-form">
+        <input type="hidden" name="santri_id" value="${santriId}">
+        <label>Golongan Darah<input type="text" name="golongan_darah" value="${escapeHtml(profil?.golongan_darah || '')}" maxlength="3"></label>
+        <label>Alergi<textarea name="alergi" rows="2">${escapeHtml(profil?.alergi || '')}</textarea></label>
+        <label>Riwayat Penyakit<textarea name="riwayat_penyakit" rows="2">${escapeHtml(profil?.riwayat_penyakit || '')}</textarea></label>
+        <label>Kontak Darurat<input type="text" name="kontak_darurat" value="${escapeHtml(profil?.kontak_darurat || '')}"></label>
+        <button type="submit">Simpan Profil</button>
+        ${!profil ? '<p class="hint">Belum ada profil untuk santri ini.</p>' : ''}
+      </form>
+      <form data-form="kesehatan-riwayat" class="kesehatan-riwayat-form">
+        <input type="hidden" name="santri_id" value="${santriId}">
+        <h4>Tambah Riwayat</h4>
+        <label>Tanggal<input type="date" name="tanggal" required value="${new Date().toISOString().slice(0, 10)}"></label>
+        <label>Keluhan<textarea name="keluhan" rows="2" required></textarea></label>
+        <label>Penanganan<textarea name="penanganan" rows="2"></textarea></label>
+        <label>Status
+          <select name="status">
+            ${daftarStatusRiwayat().map(s => `<option value="${s.value}">${escapeHtml(s.label)}</option>`).join('')}
+          </select>
+        </label>
+        <button type="submit">Simpan Riwayat</button>
+      </form>
+    `;
+    const riwayat = await listRiwayatKesehatan(santriId);
+    riwayatEl.innerHTML = riwayat.length === 0
+      ? '<p>Belum ada riwayat kesehatan.</p>'
+      : `<ul class="riwayat-kesehatan-list">${riwayat.map(r => `
+          <li>${escapeHtml(r.tanggal)} &middot; ${escapeHtml(r.keluhan)} &middot; <strong>${escapeHtml(labelStatusRiwayat(r.status))}</strong></li>
+        `).join('')}</ul>`;
+  } catch (err) {
+    profilEl.innerHTML = `<p class="error">Gagal memuat: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
 function renderFormCatatan() {
   return `
     <form data-form="catatan" class="catatan-form">
@@ -417,6 +560,18 @@ async function handleDelegatedClick(e) {
     } catch (err) {
       alert(err.message); // eslint-disable-line no-alert
     }
+  }
+}
+
+async function handleDelegatedChange(e) {
+  const sel = e.target.closest('[data-action="ubah-status-tagihan"]');
+  if (!sel) return;
+  try {
+    await updateStatusTagihan(sel.dataset.tagihanId, sel.value);
+    await muatDaftarSpp();
+  } catch (err) {
+    alert(err.message); // eslint-disable-line no-alert
+    await muatDaftarSpp();
   }
 }
 
@@ -576,6 +731,77 @@ async function handleDelegatedSubmit(e) {
       e.target.reset();
       const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
       await muatDaftarPerizinan(getCurrentProfile());
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'spp-tagihan') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu.'); return; } // eslint-disable-line no-alert
+    try {
+      await buatTagihan({
+        santriId,
+        periode: fd.get('periode'),
+        jenis: fd.get('jenis'),
+        jumlah: fd.get('jumlah'),
+        jatuhTempo: fd.get('jatuh_tempo'),
+      });
+      e.target.reset();
+      const t = e.target.querySelector('.santri-terpilih-label'); if (t) t.textContent = '';
+      await muatDaftarSpp();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'spp-pembayaran') {
+    try {
+      await catatPembayaran({
+        tagihanId: fd.get('tagihan_id'),
+        jumlahDibayar: fd.get('jumlah_dibayar'),
+        metode: fd.get('metode'),
+        dicatatOleh: getCurrentProfile().id,
+      });
+      e.target.reset();
+      await muatDaftarSpp();
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'kesehatan-cari') {
+    const santriId = fd.get('santri_id');
+    if (!santriId) { alert('Pilih santri dulu dari hasil pencarian.'); return; } // eslint-disable-line no-alert
+    await muatProfilKesehatan(santriId);
+  }
+
+  if (formType === 'kesehatan-profil') {
+    try {
+      await simpanProfilKesehatan({
+        santriId: fd.get('santri_id'),
+        golonganDarah: fd.get('golongan_darah'),
+        alergi: fd.get('alergi'),
+        riwayatPenyakit: fd.get('riwayat_penyakit'),
+        kontakDarurat: fd.get('kontak_darurat'),
+      });
+      await muatProfilKesehatan(fd.get('santri_id'));
+    } catch (err) {
+      alert(err.message); // eslint-disable-line no-alert
+    }
+  }
+
+  if (formType === 'kesehatan-riwayat') {
+    try {
+      await tambahRiwayatKesehatan({
+        santriId: fd.get('santri_id'),
+        tanggal: fd.get('tanggal'),
+        keluhan: fd.get('keluhan'),
+        penanganan: fd.get('penanganan'),
+        status: fd.get('status'),
+        dicatatOleh: getCurrentProfile().id,
+      });
+      await muatProfilKesehatan(fd.get('santri_id'));
     } catch (err) {
       alert(err.message); // eslint-disable-line no-alert
     }
