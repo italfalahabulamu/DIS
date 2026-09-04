@@ -41,16 +41,15 @@ sekarang total **24 migrasi**, bukan 23):
 
 ## 🔴 BLOCKER — harus selesai sebelum apa pun di bawah bisa jalan
 
-### 1. Buat project Supabase baru untuk DIS
+### 1. Buat project Supabase baru untuk DIS ✅ SELESAI (2026-09-05)
 
-DIS **belum pernah** punya project Supabase. Ini **project terpisah**
-dari dataku2026 (`sjpsexkdllnlxbvnnypk`) — jangan pakai project yang
-sama, populasi akun/auth harus berbeda (sudah ditegaskan eksplisit di
-`schema_017_users_auth.sql`).
+Project dibuat: `ovekmgylzofdxwptqbla`. Ini **project terpisah** dari
+dataku2026 (`sjpsexkdllnlxbvnnypk`) — populasi akun/auth berbeda,
+sesuai yang ditegaskan di `schema_017_users_auth.sql`.
 
-- [ ] Buat project baru di [supabase.com/dashboard](https://supabase.com/dashboard)
-- [ ] Catat **Project URL** dan **anon public key** (Settings → API) — dibutuhkan di langkah 3
-- [ ] Aktifkan extension `btree_gist` kalau belum default (dipakai `santri_kelas_riwayat` dan `santri_asrama_riwayat` untuk exclude constraint anti-tumpang-tindih periode) — biasanya sudah tersedia, tapi migrasi `schema_021` memanggil `create extension if not exists btree_gist;` sendiri jadi ini seharusnya otomatis.
+- [x] Buat project baru di [supabase.com/dashboard](https://supabase.com/dashboard)
+- [x] Catat **Project URL** dan **anon public key** (Settings → API) — sudah diisi di `config.js` (langkah 3)
+- [ ] Aktifkan extension `btree_gist` kalau belum default (dipakai `santri_kelas_riwayat` dan `santri_asrama_riwayat` untuk exclude constraint anti-tumpang-tindih periode) — biasanya sudah tersedia, tapi migrasi `schema_021` memanggil `create extension if not exists btree_gist;` sendiri jadi ini seharusnya otomatis. **BELUM diverifikasi** — cek saat menjalankan migrasi #2 di bawah.
 
 ### 2. Jalankan 24 migrasi SQL
 
@@ -69,12 +68,20 @@ dijalankan ke Postgres sungguhan**. Kalau ada error urutan dependency
 yang perlu diperbaiki, bukan sesuatu yang aman dilewati/diubah manual
 di Dashboard tanpa migrasi baru.
 
-### 3. Isi kredensial di `public/js/config.js`
+### 3. Isi kredensial di `public/js/config.js` ✅ SELESAI (2026-09-05)
 
-Setelah project ada dan migrasi jalan:
+- [x] Ganti `SUPABASE_URL` dan `SUPABASE_ANON_KEY` di `public/js/config.js` dengan nilai asli dari langkah 1 (commit `3ae7648`)
+- [x] Commit + push ke `main`
 
-- [ ] Ganti `SUPABASE_URL` dan `SUPABASE_ANON_KEY` di `public/js/config.js` dengan nilai asli dari langkah 1
-- [ ] Commit + push ke `main` (anon key **aman** ditaruh di file yang di-serve browser — batas keamanan sungguhan ada di RLS tabel, bukan kerahasiaan key ini, lihat komentar di file tsb)
+**PENTING — urutan sebenarnya terbalik dari rencana:** kredensial ini
+diisi **sebelum** migrasi #2 diverifikasi jalan (project baru dibuat,
+belum dikonfirmasi 24 migrasi + seed sudah dieksekusi). Ini AMAN
+(anon/publishable key memang didesain publik, lihat komentar di
+`config.js`) tapi **jangan asumsikan aplikasi sudah bisa dipakai** --
+kalau migrasi belum jalan, `config.js` menunjuk ke project yang
+tabelnya masih kosong/belum ada, aplikasi akan error saat fetch,
+BUKAN tanda ada yang salah dengan langkah ini. Langkah 2 di atas
+tetap wajib dikerjakan sebelum smoke test punya arti.
 
 ---
 
