@@ -17,8 +17,8 @@
 // Cara isi: Supabase Dashboard project DIS -> Settings -> API ->
 // "Project URL" dan "anon public" key.
 // ============================================================
-export const SUPABASE_URL = 'ISI_URL_PROJECT_SUPABASE_DIS_DI_SINI';
-export const SUPABASE_ANON_KEY = 'ISI_ANON_KEY_PROJECT_SUPABASE_DIS_DI_SINI';
+export const SUPABASE_URL = 'https://ovekmgylzofdxwptqbla.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_4EEwFNigv7tNlyMqnkAqXw_Xu03x-Cg';
 
 export const isConfigured = () =>
   SUPABASE_URL.startsWith('https://') && !SUPABASE_ANON_KEY.startsWith('ISI_');
