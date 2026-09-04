@@ -87,6 +87,8 @@ pernah dijalankan.
 | 7.4 | Login ustadz atau musyrif, cek section Kesehatan | ustadz/musyrif | Section **tidak tampil sama sekali** (gate role di uiShell.js) — kalau dipaksa lewat API, harus ditolak RLS juga | ☐ |
 | 7.5 | Tambah riwayat kesehatan (episodik) | admin dan wali | Keduanya berhasil insert | ☐ |
 | 7.6 | Login wali, coba lihat/update profil kesehatan santri **yang bukan anaknya** | wali | **Ditolak** | ☐ |
+| 7.7 | Login wali, update profil kesehatan anaknya, lalu cek kolom `updated_oleh` di baris hasil | wali | Terisi **user id wali itu sendiri** (dipaksa trigger `force_actor_column`, schema_024) — BUKAN nilai apa pun yang mungkin dikirim frontend | ☐ |
+| 7.8 | (Opsional, butuh akses REST/SQL langsung) Kirim update ke `kesehatan` dengan `updated_oleh` = id user lain (mis. id admin) | wali | Baris tetap tersimpan tapi `updated_oleh` **tetap** = id wali yang login, bukan id yang dikirim — membuktikan trigger menutup celah pemalsuan atribusi (temuan S-02) | ☐ |
 
 ## 8. Known limitation yang harus diverifikasi, bukan dianggap bug
 

@@ -18,6 +18,25 @@ asli**. Checklist smoke test manual lengkap sekarang ada di
 selesai, jangan anggap modul mana pun "siap pakai" sebelum semua baris
 di checklist itu tercentang.
 
+**Update 2026-09-04 — Security Audit (skill `security-engineer`):**
+Audit statis atas 23 migrasi menemukan 2 temuan nyata, sudah
+diperbaiki di `schema_024_fix_attribution_spoofing.sql` (migrasi #24,
+sekarang total **24 migrasi**, bukan 23):
+- **S-02 (High)** — 9 kolom atribusi (`dicatat_oleh`/`input_oleh`/
+  `updated_oleh`/`diubah_oleh`) diisi dari nilai kiriman client tanpa
+  validasi server, bisa dipalsukan. Ditutup lewat trigger yang
+  memaksa kolom tsb = `auth.uid()`, mengabaikan kiriman client.
+- **S-05 (Medium)** — `wali_update_kesehatan` sekarang punya
+  `WITH CHECK` eksplisit (perilaku sama, cuma tidak lagi implisit).
+- Detail lengkap (termasuk yang sengaja TIDAK di-auto-fix:
+  `perizinan.disetujui_oleh`, `pelanggaran.pelapor_dis_user_id`, dan
+  alasan masing-masing) ada di komentar header
+  `schema_024_fix_attribution_spoofing.sql`.
+- **Verdict audit: masih No-Go** — S-03 (RLS belum pernah diuji ke
+  Postgres asli) tetap blocker utama, tidak berubah oleh perbaikan
+  ini. Migrasi #24 wajib ikut smoke test yang sama seperti 23 migrasi
+  lain, bukan pengecualian.
+
 ---
 
 ## 🔴 BLOCKER — harus selesai sebelum apa pun di bawah bisa jalan
@@ -33,7 +52,7 @@ sama, populasi akun/auth harus berbeda (sudah ditegaskan eksplisit di
 - [ ] Catat **Project URL** dan **anon public key** (Settings → API) — dibutuhkan di langkah 3
 - [ ] Aktifkan extension `btree_gist` kalau belum default (dipakai `santri_kelas_riwayat` dan `santri_asrama_riwayat` untuk exclude constraint anti-tumpang-tindih periode) — biasanya sudah tersedia, tapi migrasi `schema_021` memanggil `create extension if not exists btree_gist;` sendiri jadi ini seharusnya otomatis.
 
-### 2. Jalankan 23 migrasi SQL
+### 2. Jalankan 24 migrasi SQL
 
 Folder `supabase/migrations/` sudah berurutan secara kronologis
 (nama file diawali timestamp) — jalankan **berurutan**, jangan
@@ -41,10 +60,10 @@ diacak.
 
 - [ ] `supabase db push` (kalau pakai Supabase CLI, direkomendasikan — otomatis urut)
 - [ ] **Atau** manual lewat SQL Editor Dashboard, file demi file sesuai urutan nama
-- [ ] Verifikasi 23 file berhasil jalan tanpa error (`schema_001` s.d. `schema_023`)
+- [ ] Verifikasi 24 file berhasil jalan tanpa error (`schema_001` s.d. `schema_024`)
 
 **Catatan tervalidasi terhadap Postgres asli — TIDAK ADA.** Seluruh
-23 migrasi ini logically masuk akal secara SQL tapi **belum pernah
+24 migrasi ini logically masuk akal secara SQL tapi **belum pernah
 dijalankan ke Postgres sungguhan**. Kalau ada error urutan dependency
 (FK ke tabel yang belum ada, dst), laporkan balik — itu bug di migrasi
 yang perlu diperbaiki, bukan sesuatu yang aman dilewati/diubah manual
