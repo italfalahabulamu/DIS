@@ -37,19 +37,31 @@ on conflict (id) do nothing;
 -- --------------------------------------------------------------
 -- Santri (2 baris — masing-masing anak dari wali yang berbeda,
 -- supaya smoke test 7.6/7.9 dkk bisa menguji isolasi wali)
+--
+-- CATATAN: santri TIDAK PUNYA kolom kelas_id -- kolom itu di-DROP
+-- di schema_002 (digantikan santri_kelas_riwayat). Penempatan kelas
+-- diisi lewat INSERT terpisah ke santri_kelas_riwayat di bawah.
 -- --------------------------------------------------------------
-insert into public.santri (id, nis, nama_lengkap, tanggal_lahir, jenis_kelamin, kelas_id, status, tanggal_masuk)
+insert into public.santri (id, nis, nama_lengkap, tanggal_lahir, jenis_kelamin, status, tanggal_masuk)
 values
-  ('00000000-0000-0000-0000-000000000301', 'DEMO-0001', 'Fulan bin Ahmad', '2015-01-01', 'L',
-    '00000000-0000-0000-0000-000000000101', 'aktif', '2024-07-01'),
-  ('00000000-0000-0000-0000-000000000302', 'DEMO-0002', 'Fulanah binti Siti', '2015-02-02', 'P',
-    '00000000-0000-0000-0000-000000000101', 'aktif', '2024-07-01')
+  ('00000000-0000-0000-0000-000000000301', 'DEMO-0001', 'Fulan bin Ahmad', '2015-01-01', 'L', 'aktif', '2024-07-01'),
+  ('00000000-0000-0000-0000-000000000302', 'DEMO-0002', 'Fulanah binti Siti', '2015-02-02', 'P', 'aktif', '2024-07-01')
 on conflict (id) do nothing;
 
 insert into public.santri_wali (santri_id, wali_id)
 values
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000201'),
   ('00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000202')
+on conflict do nothing;
+
+-- --------------------------------------------------------------
+-- Penempatan kelas (santri_kelas_riwayat, schema_002) --
+-- tanggal_selesai NULL = penempatan masih aktif sekarang.
+-- --------------------------------------------------------------
+insert into public.santri_kelas_riwayat (santri_id, kelas_id, tanggal_mulai, tanggal_selesai)
+values
+  ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000101', '2024-07-01', null),
+  ('00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000101', '2024-07-01', null)
 on conflict do nothing;
 
 -- Sesudah ini jalan, cek scripts/seed-mock-accounts.mjs untuk
